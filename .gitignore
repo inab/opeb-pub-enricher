@@ -1,2 +1,7 @@
 *.pyc
 __pycache__
+
+.py*env
+*[rR]esults*
+*[cC]ache*
+*.ini

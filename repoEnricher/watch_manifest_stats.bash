@@ -1,3 +1,0 @@
-#!/bin/bash
-
-exec watch -x jq 'def roundit: .*1000.0|round/1000.0; { "@started": ."@started", "@timestamp": ."@timestamp", "total": ((.entries.with_repo | length) + (.entries.no_repo | length)), "with": { "@timestamp": .entries.with_repo[-1]."@timestamp", "count": .entries.with_repo | length, "percent": ((.entries.with_repo | length) / ((.entries.with_repo | length) + (.entries.no_repo | length))) | roundit}, "no": { "@timestamp": .entries.no_repo[-1]."@timestamp", "count": .entries.no_repo | length , "percent": ((.entries.no_repo | length) / ((.entries.with_repo | length) + (.entries.no_repo | length))) | roundit}, "finished": .finished }' "$1"
