@@ -5,3 +5,6 @@ __pycache__
 *[rR]esults*
 *[cC]ache*
 *.ini
+
+build/
+*.egg-info/
