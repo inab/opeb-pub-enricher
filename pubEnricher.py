@@ -10,10 +10,10 @@ import configparser
 # Next method is used to label methods as deprecated
 
 
-from libs.pub_common import *
-from libs.opeb_queries import OpenEBenchQueries
-from libs.europepmc_enricher import EuropePMCEnricher
-from libs.meta_pub_enricher import MetaEnricher, DEFAULT_BACKEND, RECOGNIZED_BACKENDS_HASH
+from opeb_pub_enricher.pub_common import *
+from opeb_pub_enricher.opeb_queries import OpenEBenchQueries
+from opeb_pub_enricher.europepmc_enricher import EuropePMCEnricher
+from opeb_pub_enricher.meta_pub_enricher import MetaEnricher, DEFAULT_BACKEND, RECOGNIZED_BACKENDS_HASH
 
 #############
 # Main code #
