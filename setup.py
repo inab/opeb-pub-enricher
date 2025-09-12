@@ -12,9 +12,9 @@ import setuptools
 setupDir = os.path.dirname(__file__)
 sys.path.insert(0, setupDir)
 
-from opeb_pub_enricher import __version__ as ope_version
-from opeb_pub_enricher import __author__ as ope_author
-from opeb_pub_enricher import __license__ as ope_license
+from opeb_pub_enricher import __version__ as ope_version  # noqa: E402
+from opeb_pub_enricher import __author__ as ope_author  # noqa: E402
+from opeb_pub_enricher import __license__ as ope_license  # noqa: E402
 
 # Populating the long description
 readme_path = os.path.join(setupDir, "README.md")

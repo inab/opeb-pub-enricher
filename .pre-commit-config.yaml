@@ -17,15 +17,29 @@ repos:
         files: \.(yaml|yml)$
   - repo: https://github.com/astral-sh/ruff-pre-commit
     # Ruff version.
-    rev: v0.11.6
+    rev: v0.11.10
     hooks:
       # Run the linter.
-      - id: ruff
-      # Run the formatter.
-      - id: ruff-format
+      - id: ruff-check
+# Main problem: python executable path, used to find the environment, is hardcoded
+  - repo: https://github.com/pre-commit/mirrors-mypy.git
+    rev: v1.15.0
+    hooks:
+      - id: mypy
+        alias: mirrormypy
+        exclude: "/(site-packages|development-[^/]*|docs|node_modules|__pycache__|\\..*)/$"
+        require_serial: true
+        entry: env PYTHONPATH=. mypy
+        args: [--strict, --show-error-codes, --no-warn-unused-ignores, --python-executable, .env12/bin/python]
   - repo: https://github.com/koalaman/shellcheck-precommit.git
     rev: v0.10.0
     hooks:
       - id: shellcheck
         #args: [--format,json]
         stages: [manual]
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    # Ruff version.
+    rev: v0.11.10
+    hooks:
+      # Run the formatter.
+      - id: ruff-format

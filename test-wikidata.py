@@ -1,6 +1,8 @@
 #!/usr/bin/python3
 
-from SPARQLWrapper import SPARQLWrapper, JSON
+# type: ignore
+
+from SPARQLWrapper import SPARQLWrapper, JSON, POSTDIRECTLY
 
 sparql = SPARQLWrapper("https://query.wikidata.org/sparql")
 sparql.setQuery("""
@@ -27,9 +29,22 @@ SELECT ?item ?itemLabel ?item_pubmed_id ?item_doi_id ?item_pmc_id WHERE {
   SERVICE wikibase:label { bd:serviceParam wikibase:language "[AUTO_LANGUAGE],en". }
 }
 """)
+sparql.addParameter(
+    "default-graph-uri", "https://query.wikidata.org/subgraph/scholarly_articles"
+)
+sparql.setRequestMethod(POSTDIRECTLY)
 sparql.setReturnFormat(JSON)
 results = sparql.query().convert()
 
 for result in results["results"]["bindings"]:
-	print("\t".join((result["item"]["value"],result["itemLabel"]["value"],result.get("item_pubmed_id",{"value":'(none)'})["value"],result.get("item_doi_id",{"value":'(none)'})["value"],result.get("item_pmc_id",{"value":'(none)'})["value"])))
-
+    print(
+        "\t".join(
+            (
+                result["item"]["value"],
+                result["itemLabel"]["value"],
+                result.get("item_pubmed_id", {"value": "(none)"})["value"],
+                result.get("item_doi_id", {"value": "(none)"})["value"],
+                result.get("item_pmc_id", {"value": "(none)"})["value"],
+            )
+        )
+    )

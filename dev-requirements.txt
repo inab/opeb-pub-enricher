@@ -2,3 +2,4 @@ ruff
 pre-commit
 build
 twine
+-r mypy-requirements.txt

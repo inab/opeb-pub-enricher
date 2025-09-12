@@ -324,7 +324,9 @@
 								{
 									"items": {
 										"$ref": "#/definitions/FoundPublication"
-									},
+									}
+								},
+								{
 									"items": {
 										"$ref": "#/definitions/FoundPublicationRef"
 									}
