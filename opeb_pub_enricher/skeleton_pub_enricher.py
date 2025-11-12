@@ -50,6 +50,7 @@ if TYPE_CHECKING:
 
     from .pub_cache import (
         Citation,
+        CitationCount,
         CitRefMinimal,
         CountPerYear,
         GatheredCitations,
@@ -60,6 +61,7 @@ if TYPE_CHECKING:
         IdMappingMinimal,
         QueryId,
         Reference,
+        ReferenceCount,
         TransientCitRefRefs,
         TransientCitRefStats,
     )
@@ -678,6 +680,8 @@ class SkeletonPubEnricher(ABC):
                 _id = pub_field["id"]  # 11932250
                 source_id = pub_field["source"]
 
+                citation_count: "Optional[CitationCount]" = None
+                reference_count: "Optional[ReferenceCount]" = None
                 if (mode & 2) != 0:
                     cits_count = self.pubC.getCitationsAndCount((source_id, _id))
                     if cits_count[0] is not None:
