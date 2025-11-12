@@ -724,7 +724,7 @@ class SkeletonPubEnricher(ABC):
                     pub_field_s["citation_stats"] = (
                         None
                         if maybe_citations is None
-                        else self._citrefStats(citations)
+                        else self._citrefStats(maybe_citations)
                     )
 
                 if (mode & 1) != 0:
@@ -735,7 +735,7 @@ class SkeletonPubEnricher(ABC):
                     pub_field_s["reference_stats"] = (
                         None
                         if maybe_references is None
-                        else self._citrefStats(references)
+                        else self._citrefStats(maybe_references)
                     )
         elif verbosityLevel > 1:
             populables: "MutableSequence[Union[Citation, Reference]]" = []
