@@ -60,7 +60,6 @@ if TYPE_CHECKING:
         GatheredReferences,
         IdMapping,
         IdMappingMinimal,
-        PubDBCache,
         QueryId,
         Reference,
         TransientCitRefRefs,
@@ -86,6 +85,9 @@ if TYPE_CHECKING:
 
 
 from . import pub_common
+from .pub_cache import (
+    PubDBCache,
+)
 
 # import threading
 # import gc
