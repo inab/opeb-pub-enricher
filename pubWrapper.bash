@@ -44,9 +44,9 @@ if [ $# -eq 3 ] ; then
 	if [ ! -d "$workDir" ] ; then
 		mkdir -p "$workDir"
 		exec > "${workDir}/log.txt" 2>&1
-		source "${SCRIPTDIR}"/.py3env/bin/activate
+		# source "${SCRIPTDIR}"/.py3env/bin/activate
 		set +e
-		python "${SCRIPTDIR}"/pubEnricher.py -d -b meta -C "${SCRIPTDIR}"/cron-config.ini -D "$workDir" --use-opeb "$toolsFileXZ" "${parentCacheDir}"/pubCacheDir
+		"${SCRIPTDIR}"/.py3env/bin/python "${SCRIPTDIR}"/pubEnricher.py -d -b meta -C "${SCRIPTDIR}"/cron-config.ini -D "$workDir" --use-opeb "$toolsFileXZ" "${parentCacheDir}"/pubCacheDir
 		retval=$?
 		set -e
 	fi
