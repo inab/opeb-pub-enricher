@@ -1,22 +1,21 @@
 #!/usr/bin/python
 
-import sys
-import os
-import json
+from abc import ABC, abstractmethod
+import configparser
 import copy
+import datetime
+import http
+import json
+import os
+import socket
+import sys
+import time
 
 from urllib import request
 from urllib.error import (
     HTTPError,
     URLError,
 )
-import http
-import socket
-
-import datetime
-import time
-
-from abc import ABC, abstractmethod
 
 from typing import (
     cast,
@@ -25,7 +24,6 @@ from typing import (
 )
 
 if TYPE_CHECKING:
-    import configparser
     from types import TracebackType
     from typing import (
         Any,
@@ -78,13 +76,13 @@ if TYPE_CHECKING:
         SourceId,
         UnqualifiedId,
     )
-    from .doi_cache import DOIChecker
 
     MutablePartialMapping: TypeAlias = MutableMapping[str, Any]
     PartialMapping: TypeAlias = Mapping[str, Any]
 
 
 from . import pub_common
+from .doi_cache import DOIChecker
 from .pub_cache import (
     PubDBCache,
 )
@@ -829,7 +827,7 @@ class SkeletonPubEnricher(ABC):
         while retries <= self.max_retries:
             try:
                 # The original bytes
-                response = b""
+                response: "bytes" = b""
                 with request.urlopen(theRequest, timeout=timeout) as req:
                     while True:
                         try:

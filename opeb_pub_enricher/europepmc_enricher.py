@@ -457,7 +457,7 @@ class EuropePMCEnricher(AbstractPubEnricher):
                     )
                     if citations is None:
                         citations = []
-                    citref["citations"] = cast("Sequence[Citation]", citations)
+                    citref["citations"] = citations
                     citref["citation_count"] = citation_count
 
                 if (mode & 1) != 0 and (pub_field.get("references") is None):
@@ -466,7 +466,7 @@ class EuropePMCEnricher(AbstractPubEnricher):
                     )
                     if references is None:
                         references = []
-                    citref["references"] = cast("Sequence[Reference]", references)
+                    citref["references"] = references
                     citref["reference_count"] = reference_count
 
                 yield citref

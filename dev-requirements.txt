@@ -2,4 +2,7 @@ ruff
 pre-commit
 build
 twine
+mypy
+pylint
+setuptools
 -r mypy-requirements.txt

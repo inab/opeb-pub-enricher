@@ -22,15 +22,36 @@ repos:
       # Run the linter.
       - id: ruff-check
 # Main problem: python executable path, used to find the environment, is hardcoded
-  - repo: https://github.com/pre-commit/mirrors-mypy.git
-    rev: v1.15.0
+#  - repo: https://github.com/pre-commit/mirrors-mypy.git
+#    rev: v1.15.0
+#    hooks:
+#      - id: mypy
+#        alias: mirrormypy
+#        exclude: "/(site-packages|development-[^/]*|docs|node_modules|__pycache__|\\..*)/$"
+#        require_serial: true
+#        entry: env PYTHONPATH=. mypy
+#        args: [--strict, --show-error-codes, --no-warn-unused-ignores, --python-executable, .env12/bin/python]
+  - repo: local
     hooks:
+      - id: pylint
+        name: Local PyLint
+        language: system
+        require_serial: true
+        types:
+          - python
+        exclude: "^[^/]*env/|dev-[^/]*/|docs/"
+        entry: pylint
+        args: [-j , "4", --source-roots, .]
       - id: mypy
-        alias: mirrormypy
+        name: Local MyPy
+        language: system
+        types_or:
+          - python
+          - pyi
         exclude: "/(site-packages|development-[^/]*|docs|node_modules|__pycache__|\\..*)/$"
         require_serial: true
-        entry: env PYTHONPATH=. mypy
-        args: [--strict, --show-error-codes, --no-warn-unused-ignores, --python-executable, .env12/bin/python]
+        entry: mypy
+        args: [--strict, --show-error-codes, --no-warn-unused-ignores]
   - repo: https://github.com/koalaman/shellcheck-precommit.git
     rev: v0.10.0
     hooks:
