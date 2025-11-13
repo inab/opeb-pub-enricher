@@ -324,19 +324,29 @@ class PubmedEnricher(AbstractPubEnricher):
             eresult = id_mappings.get("esearchresult")
             if eresult is not None:
                 idlist = eresult.get("idlist")
-                translationstack = eresult.get("translationstack")
 
                 # First, record the
-                if idlist is not None and translationstack is not None:
-                    for _id, query_str in zip(idlist, translationstack):
-                        # This is a very minimal mapping
-                        # needed to enrich and relate
-                        mapping = {
-                            "id": str(_id),
-                            "source": self.PUBMED_SOURCE,
-                            #'query': query_str,
-                        }
-                        mappings.append(mapping)
+                if idlist is not None:
+                    translationstack = eresult.get("translationstack")
+                    # This is a very minimal mapping
+                    # needed to enrich and relate
+                    if translationstack is not None:
+                        for _id, query_str in zip(idlist, translationstack):
+                            mapping = {
+                                "id": str(_id),
+                                "source": self.PUBMED_SOURCE,
+                                #'query': query_str,
+                            }
+                            mappings.append(mapping)
+                    else:
+                        for _id in idlist:
+                            # This is a very minimal mapping
+                            # needed to enrich and relate
+                            mapping = {
+                                "id": str(_id),
+                                "source": self.PUBMED_SOURCE,
+                            }
+                            mappings.append(mapping)
 
             # print(json.dumps(entries,indent=4))
 
@@ -379,7 +389,7 @@ class PubmedEnricher(AbstractPubEnricher):
 
         for query in query_citations_data:
             raw_ids.append(query["id"])
-            query_hash[cast("UnqualifiedId", str(query["id"]))] = query
+            query_hash[query["id"]] = query
 
         # Second, query by batches
         for start in range(0, len(raw_ids), self.elink_step_size):
