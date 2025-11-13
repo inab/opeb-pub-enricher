@@ -16,6 +16,7 @@ from typing import (
 
 if TYPE_CHECKING:
     from typing import (
+        Any,
         Final,
         Iterable,
         Iterator,
@@ -417,6 +418,7 @@ class PubmedEnricher(AbstractPubEnricher):
                 self.ELINKS_URL, data=elink_url_data.encode("utf-8")
             )
             retries = 0
+            raw_json_citations: "Optional[Mapping[str, Any]]" = None
             while retries <= self.max_retries:
                 raw_json_citation_refs = self.retriable_full_http_read(
                     elinksReq, debug_url=debug_elink_url
@@ -441,6 +443,13 @@ class PubmedEnricher(AbstractPubEnricher):
                             file=sys.stderr,
                         )
                         sys.stderr.flush()
+
+            if retries > self.max_retries:
+                raise Exception(
+                    f"Max {self.max_retries} reached, due {retrymsg}. Dump of last try:\n{raw_json_citation_refs!r}"
+                )
+
+            assert raw_json_citations is not None
 
             linksets = raw_json_citations.get("linksets")
             if linksets is not None:
