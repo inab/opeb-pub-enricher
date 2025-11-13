@@ -446,10 +446,12 @@ class PubmedEnricher(AbstractPubEnricher):
 
             if retries > self.max_retries:
                 raise Exception(
-                    f"Max {self.max_retries} reached, due {retrymsg}. Dump of last try:\n{raw_json_citation_refs!r}"
+                    f"Max {self.max_retries} reached requesting {self.ELINKS_URL + '?' + elink_url_data}, due {retrymsg}. Dump of last try:\n{raw_json_citation_refs!r}"
                 )
 
-            assert raw_json_citations is not None
+            assert raw_json_citations is not None, (
+                f"Assertion error requesting {self.ELINKS_URL + '?' + elink_url_data}"
+            )
 
             linksets = raw_json_citations.get("linksets")
             if linksets is not None:
