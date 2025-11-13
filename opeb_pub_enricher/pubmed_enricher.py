@@ -379,7 +379,7 @@ class PubmedEnricher(AbstractPubEnricher):
 
         for query in query_citations_data:
             raw_ids.append(query["id"])
-            query_hash[query["id"]] = query
+            query_hash[cast("UnqualifiedId", str(query["id"]))] = query
 
         # Second, query by batches
         for start in range(0, len(raw_ids), self.elink_step_size):
