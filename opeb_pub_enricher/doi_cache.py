@@ -1,8 +1,15 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
 
-import os
 import datetime
+import inspect
+import json
+import logging
+import os
+import re
+import sqlite3
+import urllib.parse
+import zlib
 
 from typing import (
     TYPE_CHECKING,
@@ -33,14 +40,6 @@ if TYPE_CHECKING:
     DOIHandle = NewType("DOIHandle", MutableMapping[str, Any])
 
 from .pub_common import Timestamps
-
-
-import json
-import sqlite3
-import zlib
-from urllib import parse
-
-import re
 
 
 class DOIChecker(object):
@@ -74,6 +73,13 @@ class DOIChecker(object):
     DEFAULT_CHECK_DB_FILE: "Final[str]" = "DOIcheck_CACHE.db"
 
     def __init__(self, cache_dir: "str" = "."):
+        # Getting a logger focused on specific classes
+        self.logger = logging.getLogger(
+            dict(inspect.getmembers(self))["__module__"]
+            + "::"
+            + self.__class__.__name__
+        )
+
         self.cache_dir = cache_dir
 
         # self.debug_cache_dir = os.path.join(cache_dir,'debug')
@@ -143,7 +149,7 @@ CREATE INDEX IF NOT EXISTS doi_check_doi ON doi_check(doi COLLATE NOCASE)
             doi_id = found_pat.group(1)
         elif doi_id.startswith("http"):
             # It is an URL
-            parsed_doi_id = parse.urlparse(doi_id)
+            parsed_doi_id = urllib.parse.urlparse(doi_id)
             if parsed_doi_id.netloc.endswith("doi.org"):
                 # Removing the initial slash
                 doi_id = parsed_doi_id.path[1:]

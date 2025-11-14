@@ -1,7 +1,5 @@
 #!/usr/bin/python
 
-import sys
-
 from collections import OrderedDict
 import copy
 
@@ -195,7 +193,6 @@ class MetaEnricher(SkeletonPubEnricher):
         cache: "str",
         prefix: "Optional[str]" = None,
         config: "Optional[configparser.ConfigParser]" = None,
-        debug: "bool" = False,
         doi_checker: "Optional[DOIChecker]" = None,
     ): ...
 
@@ -205,7 +202,6 @@ class MetaEnricher(SkeletonPubEnricher):
         cache: "PubDBCache",
         prefix: "Optional[str]" = None,
         config: "Optional[configparser.ConfigParser]" = None,
-        debug: "bool" = False,
         doi_checker: "Optional[DOIChecker]" = None,
     ): ...
 
@@ -214,7 +210,6 @@ class MetaEnricher(SkeletonPubEnricher):
         cache: "Union[str, PubDBCache]",
         prefix: "Optional[str]" = None,
         config: "Optional[configparser.ConfigParser]" = None,
-        debug: "bool" = False,
         doi_checker: "Optional[DOIChecker]" = None,
     ):
         # self.debug_cache_dir = os.path.join(cache_dir,'debug')
@@ -252,9 +247,9 @@ class MetaEnricher(SkeletonPubEnricher):
             enricher_class = self.RECOGNIZED_BACKENDS_HASH.get(enricher_name)
             if enricher_class:
                 # Each value is an instance of AbstractPubEnricher
-                # enrichers[enricher_name] = enricher_class(cache,prefix,config,debug)
+                # enrichers[enricher_name] = enricher_class(cache,prefix,config)
                 ep, eqs, eqr = _multiprocess_wrapper(
-                    enricher_class, cache_dir, prefix, config, debug, doi_checker
+                    enricher_class, cache_dir, prefix, config, doi_checker
                 )
 
                 enrichers_pool[enricher_name] = (ep, eqs, eqr, enricher_name)
@@ -274,7 +269,9 @@ class MetaEnricher(SkeletonPubEnricher):
         else:
             pubC = cache
 
-        super().__init__(pubC, meta_prefix, config, debug, doi_checker)
+        super().__init__(
+            pubC, prefix=meta_prefix, config=config, doi_checker=doi_checker
+        )
 
         self.enrichers_pool = enrichers_pool
 
@@ -734,9 +731,7 @@ class MetaEnricher(SkeletonPubEnricher):
                         # This one should not exist, skip it
                         pass
                     else:
-                        print("FIXME", file=sys.stderr)
-                        print(base_pub, file=sys.stderr)
-                        sys.stderr.flush()
+                        self.logger.warning(f"FIXME\n{base_pub}")
 
         # After clustering, issue the batch calls to each enricher in parallel
         eptuples = []

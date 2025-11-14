@@ -38,7 +38,6 @@ class AbstractPubEnricher(SkeletonPubEnricher):
         cache: "str",
         prefix: "Optional[str]" = None,
         config: "Optional[configparser.ConfigParser]" = None,
-        debug: "bool" = False,
         doi_checker: "Optional[DOIChecker]" = None,
     ): ...
 
@@ -48,7 +47,6 @@ class AbstractPubEnricher(SkeletonPubEnricher):
         cache: "PubDBCache",
         prefix: "Optional[str]" = None,
         config: "Optional[configparser.ConfigParser]" = None,
-        debug: "bool" = False,
         doi_checker: "Optional[DOIChecker]" = None,
     ): ...
 
@@ -57,10 +55,9 @@ class AbstractPubEnricher(SkeletonPubEnricher):
         cache: "Union[str, PubDBCache]",
         prefix: "Optional[str]" = None,
         config: "Optional[configparser.ConfigParser]" = None,
-        debug: "bool" = False,
         doi_checker: "Optional[DOIChecker]" = None,
     ):
-        super().__init__(cache, prefix, config, debug, doi_checker)
+        super().__init__(cache, prefix=prefix, config=config, doi_checker=doi_checker)
 
         # The section name is the symbolic name given to this class
         section_name = self.Name()

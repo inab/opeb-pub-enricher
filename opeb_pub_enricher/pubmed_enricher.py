@@ -1,6 +1,5 @@
 #!/usr/bin/python
 
-import sys
 import json
 import time
 import configparser
@@ -53,6 +52,10 @@ if TYPE_CHECKING:
 
 from .abstract_pub_enricher import AbstractPubEnricher
 
+from .skeleton_pub_enricher import (
+    PubEnricherException,
+)
+
 from . import pub_common
 
 
@@ -70,7 +73,6 @@ class PubmedEnricher(AbstractPubEnricher):
         cache: "str",
         prefix: "Optional[str]" = None,
         config: "Optional[configparser.ConfigParser]" = None,
-        debug: "bool" = False,
         doi_checker: "Optional[DOIChecker]" = None,
     ): ...
 
@@ -80,7 +82,6 @@ class PubmedEnricher(AbstractPubEnricher):
         cache: "PubDBCache",
         prefix: "Optional[str]" = None,
         config: "Optional[configparser.ConfigParser]" = None,
-        debug: "bool" = False,
         doi_checker: "Optional[DOIChecker]" = None,
     ): ...
 
@@ -89,14 +90,13 @@ class PubmedEnricher(AbstractPubEnricher):
         cache: "Union[str, PubDBCache]",
         prefix: "Optional[str]" = None,
         config: "Optional[configparser.ConfigParser]" = None,
-        debug: "bool" = False,
         doi_checker: "Optional[DOIChecker]" = None,
     ):
         # self.debug_cache_dir = os.path.join(cache_dir,'debug')
         # os.makedirs(os.path.abspath(self.debug_cache_dir),exist_ok=True)
         # self._debug_count = 0
 
-        super().__init__(cache, prefix, config, debug, doi_checker)
+        super().__init__(cache, prefix=prefix, config=config, doi_checker=doi_checker)
 
         # The section name is the symbolic name given to this class
         section_name = self.Name()
@@ -140,11 +140,7 @@ class PubmedEnricher(AbstractPubEnricher):
                 theQuery["api_key"] = self.api_key
 
             summary_url_data = parse.urlencode(theQuery)
-            debug_summary_url = (
-                self.PUB_ID_SUMMARY_URL + "?" + summary_url_data
-                if self._debug
-                else None
-            )
+            debug_summary_url = self.PUB_ID_SUMMARY_URL + "?" + summary_url_data
 
             # Queries with retries
             entriesReq = request.Request(
@@ -152,12 +148,12 @@ class PubmedEnricher(AbstractPubEnricher):
             )
             retries = 0
             while retries <= self.max_retries:
+                # Avoiding to hit the server too fast
+                time.sleep(self.request_delay)
+
                 raw_pubmed_mappings = self.retriable_full_http_read(
                     entriesReq, debug_url=debug_summary_url
                 )
-
-                # Avoiding to hit the server too fast
-                time.sleep(self.request_delay)
 
                 try:
                     pubmed_mappings = self.jd.decode(
@@ -167,14 +163,9 @@ class PubmedEnricher(AbstractPubEnricher):
                 except json.decoder.JSONDecodeError:
                     retries += 1
                     retrymsg = "PubMed mappings JSON decoding error"
-                    if self._debug:
-                        print(
-                            "\tRetry {0}, due {1}. Dump:\n{2!r}".format(
-                                retries, retrymsg, raw_pubmed_mappings
-                            ),
-                            file=sys.stderr,
-                        )
-                        sys.stderr.flush()
+                    self.logger.debug(
+                        f"Retry {retries}, due {retrymsg}. Dump:\n{raw_pubmed_mappings!r}"
+                    )
 
             results = pubmed_mappings.get("result")
             if results is not None:
@@ -285,11 +276,7 @@ class PubmedEnricher(AbstractPubEnricher):
                 theIdQuery["api_key"] = self.api_key
 
             converter_url_data = parse.urlencode(theIdQuery)
-            debug_converter_url = (
-                self.PUB_ID_CONVERTER_URL + "?" + converter_url_data
-                if self._debug
-                else None
-            )
+            debug_converter_url = self.PUB_ID_CONVERTER_URL + "?" + converter_url_data
 
             # Queries with retries
             converterReq = request.Request(
@@ -298,12 +285,12 @@ class PubmedEnricher(AbstractPubEnricher):
 
             retries = 0
             while retries <= self.max_retries:
+                # Avoiding to hit the server too fast
+                time.sleep(self.request_delay)
+
                 raw_id_mappings = self.retriable_full_http_read(
                     converterReq, debug_url=debug_converter_url
                 )
-
-                # Avoiding to hit the server too fast
-                time.sleep(self.request_delay)
 
                 try:
                     id_mappings = self.jd.decode(raw_id_mappings.decode("utf-8"))
@@ -311,14 +298,9 @@ class PubmedEnricher(AbstractPubEnricher):
                 except json.decoder.JSONDecodeError:
                     retries += 1
                     retrymsg = "PubMed raw id mappings JSON decoding error"
-                    if self._debug:
-                        print(
-                            "\tRetry {0}, due {1}. Dump:\n{2!r}".format(
-                                retries, retrymsg, raw_id_mappings
-                            ),
-                            file=sys.stderr,
-                        )
-                        sys.stderr.flush()
+                    self.logger.debug(
+                        f"Retry {retries}, due {retrymsg}. Dump:\n{raw_id_mappings!r}"
+                    )
 
             mappings = []
             # We record the unpaired DOIs
@@ -409,9 +391,7 @@ class PubmedEnricher(AbstractPubEnricher):
                 theLinksQuery["api_key"] = self.api_key
 
             elink_url_data = parse.urlencode(theLinksQuery, doseq=True)
-            debug_elink_url = (
-                self.ELINKS_URL + "?" + elink_url_data if self._debug else None
-            )
+            debug_elink_url = self.ELINKS_URL + "?" + elink_url_data
 
             # Queries with retries
             elinksReq = request.Request(
@@ -420,12 +400,12 @@ class PubmedEnricher(AbstractPubEnricher):
             retries = 0
             raw_json_citations: "Optional[Mapping[str, Any]]" = None
             while retries <= self.max_retries:
+                # Avoiding to hit the server too fast
+                time.sleep(self.request_delay)
+
                 raw_json_citation_refs = self.retriable_full_http_read(
                     elinksReq, debug_url=debug_elink_url
                 )
-
-                # Avoiding to hit the server too fast
-                time.sleep(self.request_delay)
 
                 try:
                     raw_json_citations = self.jd.decode(
@@ -435,17 +415,12 @@ class PubmedEnricher(AbstractPubEnricher):
                 except json.decoder.JSONDecodeError:
                     retries += 1
                     retrymsg = "PubMed citations JSON decoding error"
-                    if self._debug:
-                        print(
-                            "\tRetry {0}, due {1}. Dump:\n{2!r}".format(
-                                retries, retrymsg, raw_json_citation_refs
-                            ),
-                            file=sys.stderr,
-                        )
-                        sys.stderr.flush()
+                    self.logger.debug(
+                        f"Retry {retries}, due {retrymsg}. Dump:\n{raw_json_citation_refs!r}"
+                    )
 
             if retries > self.max_retries:
-                raise Exception(
+                raise PubEnricherException(
                     f"Max {self.max_retries} reached requesting {self.ELINKS_URL + '?' + elink_url_data}, due {retrymsg}. Dump of last try:\n{raw_json_citation_refs!r}"
                 )
 
@@ -484,7 +459,7 @@ class PubmedEnricher(AbstractPubEnricher):
                                 if mping[0] is not None and mping[0] not in query:
                                     citrefs_key, citrefs_count_key = mping
                                     # import sys
-                                    # print(query_hash,file=sys.stderr)
+                                    # self.logger.debug(query_hash)
                                     links = linksetdb.get("links", [])
 
                                     citrefs: "Sequence[IdMappingMinimal]" = list(

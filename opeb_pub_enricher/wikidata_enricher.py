@@ -2,7 +2,6 @@
 
 import datetime
 import http.client
-import sys
 import time
 import urllib.error
 
@@ -76,7 +75,6 @@ class WikidataEnricher(AbstractPubEnricher):
         cache: "str",
         prefix: "Optional[str]" = None,
         config: "Optional[configparser.ConfigParser]" = None,
-        debug: "bool" = False,
         doi_checker: "Optional[DOIChecker]" = None,
     ): ...
 
@@ -86,7 +84,6 @@ class WikidataEnricher(AbstractPubEnricher):
         cache: "PubDBCache",
         prefix: "Optional[str]" = None,
         config: "Optional[configparser.ConfigParser]" = None,
-        debug: "bool" = False,
         doi_checker: "Optional[DOIChecker]" = None,
     ): ...
 
@@ -95,14 +92,13 @@ class WikidataEnricher(AbstractPubEnricher):
         cache: "Union[PubDBCache, str]",
         prefix: "Optional[str]" = None,
         config: "Optional[configparser.ConfigParser]" = None,
-        debug: "bool" = False,
         doi_checker: "Optional[DOIChecker]" = None,
     ):
         # self.debug_cache_dir = os.path.join(cache_dir,'debug')
         # os.makedirs(os.path.abspath(self.debug_cache_dir),exist_ok=True)
         # self._debug_count = 0
 
-        super().__init__(cache, prefix, config, debug, doi_checker)
+        super().__init__(cache, prefix=prefix, config=config, doi_checker=doi_checker)
 
         # The section name is the symbolic name given to this class
         section_name = self.Name()
@@ -126,17 +122,12 @@ class WikidataEnricher(AbstractPubEnricher):
     def _retriableSPARQLQuery(
         self, theQuery: "str", theDelay: "Optional[float]" = None
     ) -> "SPARQLResult":
-        if self._debug:
-            print(
-                "[{}] {}".format(datetime.datetime.now().isoformat(), theQuery),
-                file=sys.stderr,
-            )
-            sys.stderr.flush()
+        self.logger.debug(f"SPARQL Query {theQuery}")
 
         retries = 0
         results: "SPARQLResult" = {"results": {}}
         while retries <= self.max_retries:
-            retryexc: "Optional[Exception]" = None
+            retryexc: "Optional[BaseException]" = None
             retrymsg = None
             retrysecs = None
 
@@ -183,26 +174,21 @@ class WikidataEnricher(AbstractPubEnricher):
 
                     # Using a backoff time of 2 seconds when 500 or 502 errors are hit
                     retrysecs = 2 + 2**retries
+            except BaseException as be:
+                retryexc = be
 
             retries += 1
             if (retrysecs is not None) and (retries <= self.max_retries):
-                if self._debug:
-                    print(
-                        "\tRetry {0} waits {1} seconds, due {2}".format(
-                            retries, retrysecs, retrymsg
-                        ),
-                        file=sys.stderr,
-                    )
-                    sys.stderr.flush()
+                self.logger.debug(
+                    f"Retry {retries} waits {retrysecs} seconds, due {retrymsg}"
+                )
 
                 time.sleep(retrysecs)
             else:
                 if retryexc is None:
                     retryexc = Exception("Untraced sparql ERROR")
 
-                if self._debug:
-                    print("Query with ERROR: " + theQuery + "\n", file=sys.stderr)
-                    sys.stderr.flush()
+                self.logger.error("Query with ERROR: " + theQuery)
 
                 raise retryexc
         return results

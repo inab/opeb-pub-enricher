@@ -2,7 +2,7 @@
 
 import argparse
 import configparser
-import datetime
+import logging
 import os
 import sys
 
@@ -21,6 +21,11 @@ if TYPE_CHECKING:
 from .opeb_queries import OpenEBenchQueries
 from .meta_pub_enricher import DEFAULT_BACKEND, RECOGNIZED_BACKENDS_HASH
 
+LOGGING_FORMAT = "%(asctime)-15s - [%(levelname)s] %(message)s"
+DEBUG_LOGGING_FORMAT = (
+    "%(asctime)-15s - [%(name)s %(funcName)s %(lineno)d][%(levelname)s] %(message)s"
+)
+
 #############
 # Main code #
 #############
@@ -28,6 +33,41 @@ from .meta_pub_enricher import DEFAULT_BACKEND, RECOGNIZED_BACKENDS_HASH
 
 def main() -> "None":
     parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--log-file",
+        dest="logFilename",
+        help="Store messages in a file instead of using standard error and standard output",
+    )
+    parser.add_argument(
+        "--log-format",
+        dest="logFormat",
+        help=f"Format of log messages (for instance {LOGGING_FORMAT.replace('%', '%%')})",
+    )
+    parser.add_argument(
+        "-q",
+        "--quiet",
+        dest="logLevel",
+        action="store_const",
+        const=logging.WARNING,
+        help="Only show engine warnings and errors",
+    )
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        dest="logLevel",
+        action="store_const",
+        const=logging.INFO,
+        help="Show verbose (informational) messages",
+    )
+    parser.add_argument(
+        "-d",
+        "--debug",
+        dest="logLevel",
+        action="store_const",
+        const=logging.DEBUG,
+        help="Show debug messages, including URLs (use with care, as it could potentially disclose sensitive contents)",
+    )
+
     parser.add_argument(
         "-F",
         "--full",
@@ -41,13 +81,6 @@ def main() -> "None":
         help="Return the reference and citation results fully annotated, not only the year",
         action="store_true",
         dest="do_annotate_citations",
-        default=False,
-    )
-    parser.add_argument(
-        "-d",
-        "--debug",
-        help="Show the URL statements",
-        action="store_true",
         default=False,
     )
     parser.add_argument(
@@ -117,6 +150,29 @@ def main() -> "None":
     )
     args = parser.parse_args()
 
+    logLevel = logging.INFO
+    if args.logLevel is not None:
+        logLevel = args.logLevel
+
+    if args.logFormat:
+        logFormat = args.logFormat
+    elif logLevel < logging.INFO:
+        logFormat = LOGGING_FORMAT
+    else:
+        logFormat = DEBUG_LOGGING_FORMAT
+
+    loggingConfig = {
+        "level": logLevel,
+        "format": logFormat,
+    }
+
+    if args.logFilename is not None:
+        loggingConfig["filename"] = args.logFilename
+    #   loggingConfig['encoding'] = 'utf-8'
+
+    logging.basicConfig(**loggingConfig)
+
+    logger = logging.getLogger("opeb-pub-enricher")
     # Now, let's work!
     verbosity_level = args.verbosity_level
 
@@ -149,7 +205,6 @@ def main() -> "None":
         args.load_opeb_filename[0] if args.load_opeb_filename is not None else None
     )
     cache_dir = args.cacheDir
-    debug = args.debug
 
     # Setting the internal verbosity level
     if args.do_annotate_citations:
@@ -166,7 +221,7 @@ def main() -> "None":
     if config_filename is None:
         config = None
     else:
-        print("* Reading config file {}".format(config_filename))
+        logger.info("* Reading config file {}".format(config_filename))
         config = configparser.ConfigParser()
         config.read(config_filename)
 
@@ -176,7 +231,7 @@ def main() -> "None":
         os.makedirs(os.path.abspath(results_path), exist_ok=True)
 
     ChosenEnricher = RECOGNIZED_BACKENDS_HASH.get(args.backend, DEFAULT_BACKEND)
-    with ChosenEnricher(cache_dir, config=config, debug=debug) as pub:  # type: ignore[misc]
+    with ChosenEnricher(cache_dir, config=config) as pub:  # type: ignore[misc]
         # Step 1: fetch the entries with associated pubmed
         opeb_q = OpenEBenchQueries(load_opeb_filename, save_opeb_filename)
         fetchedEntries = opeb_q.fetchPubIds()
@@ -184,34 +239,16 @@ def main() -> "None":
         # Step 2: reconcile the DOI <-> PubMed id of the entries
 
         try:
-            print(
-                "[{}] Output format: {} Path: {}".format(
-                    datetime.datetime.now().isoformat(), results_format, results_path
-                )
-            )
-            print(
-                "[{}] Number of tools to query about: {}".format(
-                    datetime.datetime.now().isoformat(), len(fetchedEntries)
-                )
-            )
-            sys.stdout.flush()
+            logger.info(f"Output format: {results_format} Path: {results_path}")
+            logger.info(f"Number of tools to query about: {len(fetchedEntries)}")
+
             pub.reconcilePubIds(
                 fetchedEntries,
                 results_path=results_path,
                 results_format=results_format,
                 verbosityLevel=verbosity_level,
             )
-            print("[{}] Finished!".format(datetime.datetime.now().isoformat()))
-            sys.stdout.flush()
-        except Exception as anyEx:
-            print(
-                "[{}] ERROR: Something went wrong".format(
-                    datetime.datetime.now().isoformat()
-                ),
-                file=sys.stderr,
-            )
-            print(anyEx, file=sys.stderr)
-            import traceback
-
-            traceback.print_exc(file=sys.stderr)
+            logger.info("Finished!")
+        except BaseException:
+            logger.exception("ERROR: Something went wrong")
             sys.exit(10)

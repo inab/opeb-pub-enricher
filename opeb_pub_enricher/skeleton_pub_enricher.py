@@ -5,10 +5,11 @@ import configparser
 import copy
 import datetime
 import http
+import inspect
 import json
+import logging
 import os
 import socket
-import sys
 import time
 
 from urllib import request
@@ -138,7 +139,6 @@ class SkeletonPubEnricher(ABC):
         cache: "str",
         prefix: "Optional[str]" = None,
         config: "Optional[configparser.ConfigParser]" = None,
-        debug: "bool" = False,
         doi_checker: "Optional[DOIChecker]" = None,
     ): ...
 
@@ -148,7 +148,6 @@ class SkeletonPubEnricher(ABC):
         cache: "PubDBCache",
         prefix: "Optional[str]" = None,
         config: "Optional[configparser.ConfigParser]" = None,
-        debug: "bool" = False,
         doi_checker: "Optional[DOIChecker]" = None,
     ): ...
 
@@ -157,9 +156,15 @@ class SkeletonPubEnricher(ABC):
         cache: "Union[PubDBCache, str]",
         prefix: "Optional[str]" = None,
         config: "Optional[configparser.ConfigParser]" = None,
-        debug: "bool" = False,
         doi_checker: "Optional[DOIChecker]" = None,
     ):
+        # Getting a logger focused on specific classes
+        self.logger = logging.getLogger(
+            dict(inspect.getmembers(self))["__module__"]
+            + "::"
+            + self.__class__.__name__
+        )
+
         # The section name is the symbolic name given to this class
         section_name = self.Name()
 
@@ -206,9 +211,6 @@ class SkeletonPubEnricher(ABC):
         self.max_retries = self.config.getint(
             section_name, "retries", fallback=self.DEFAULT_MAX_RETRIES
         )
-
-        # Debug flag
-        self._debug = debug
 
         # self.debug_cache_dir = os.path.join(cache_dir,'debug')
         # os.makedirs(os.path.abspath(self.debug_cache_dir),exist_ok=True)
@@ -351,15 +353,9 @@ class SkeletonPubEnricher(ABC):
                         # Result management
                         result_array.extend(gathered_pubmed_pairs)
             except Exception as anyEx:
-                print(
-                    "Something unexpected happened in cachedQueryPubIds",
-                    file=sys.stderr,
+                self.logger.exception(
+                    "Something unexpected happened in cachedQueryPubIds"
                 )
-                print(anyEx, file=sys.stderr)
-                import traceback
-
-                traceback.print_exc(file=sys.stderr)
-                sys.stderr.flush()
                 raise anyEx
 
         return result_array
@@ -475,18 +471,12 @@ class SkeletonPubEnricher(ABC):
 
                     pubmed_pairs.append(mapping)
 
-                    # print(json.dumps(entries,indent=4))
+                    # self.logger.debug(json.dumps(entries,indent=4))
                 # sys.exit(1)
             except Exception as anyEx:
-                print(
-                    "Something unexpected happened in reconcilePubIdsBatch",
-                    file=sys.stderr,
+                self.logger.exception(
+                    "Something unexpected happened in reconcilePubIdsBatch"
                 )
-                print(anyEx, file=sys.stderr)
-                import traceback
-
-                traceback.print_exc(file=sys.stderr)
-                sys.stderr.flush()
                 raise anyEx
 
         # Reconciliation and checking missing ones
@@ -618,8 +608,9 @@ class SkeletonPubEnricher(ABC):
                     query_citations_data, minimal, mode
                 )
             except Exception as anyEx:
-                print("ERROR: Something went wrong", file=sys.stderr)
-                print(anyEx, file=sys.stderr)
+                self.logger.exception(
+                    "ERROR: Something went wrong with queryCitRefsBatch"
+                )
                 raise anyEx
 
             for new_citref in cast("Sequence[GatheredCitRefs]", new_citrefs):
@@ -818,17 +809,16 @@ class SkeletonPubEnricher(ABC):
         timeout: "int" = 300,
         debug_url: "Optional[str]" = None,
     ) -> "bytes":
-        if self._debug and (debug_url is not None):
-            print(
-                "[{}] {}".format(datetime.datetime.now().isoformat(), debug_url),
-                file=sys.stderr,
-            )
-            sys.stderr.flush()
+        if debug_url is None:
+            debug_url = theRequest.full_url
+            self.logger.debug(f"Using {debug_url} as default debug URL")
+        self.logger.debug(f"Fetching {debug_url}")
         retries = 0
 
-        retryexc: "Optional[Union[HTTPError, URLError, http.client.RemoteDisconnected, socket.timeout, PubEnricherException]]" = None
+        retryexc: "Optional[BaseException]" = None
         retrymsg: "Optional[str]" = None
         while retries <= self.max_retries:
+            additional_sleep = 0
             try:
                 # The original bytes
                 response: "bytes" = b""
@@ -851,6 +841,9 @@ class SkeletonPubEnricher(ABC):
                 retryexc = e
                 if e.code >= 500:
                     retrymsg = "code {}".format(e.code)
+                    if e.code in (500, 502, 503, 504):
+                        # Giving the service additional time to recover could work
+                        additional_sleep = 60
             except URLError as e:
                 retryexc = e
                 retryreason = str(e.reason)
@@ -867,18 +860,17 @@ class SkeletonPubEnricher(ABC):
             except socket.timeout as e:
                 retrymsg = "socket timeout"
                 retryexc = e
+            except BaseException as be:
+                retryexc = be
 
             retries += 1
             if (retrymsg is not None) and (retries <= self.max_retries):
-                if self._debug:
-                    print(
-                        "\tRetry {0}, due {1}".format(retries, retrymsg),
-                        file=sys.stderr,
-                    )
-                    sys.stderr.flush()
+                self.logger.debug(
+                    f"Retry {retries} fetching {debug_url}, due {retrymsg}"
+                )
 
                 # Using a backoff time of 2 seconds when some recoverable error happens
-                time.sleep(2**retries)
+                time.sleep(additional_sleep + 2**retries)
 
                 retryexc = None
                 retrymsg = None
@@ -888,9 +880,7 @@ class SkeletonPubEnricher(ABC):
         if retryexc is None:
             retryexc = PubEnricherException("Untraced ERROR")
 
-        if debug_url is not None:
-            print("URL with ERROR: " + debug_url + "\n", file=sys.stderr)
-            sys.stderr.flush()
+        self.logger.error(f"URL with ERROR: {debug_url} . Reason: {retryexc}")
 
         raise retryexc
 
@@ -1239,15 +1229,9 @@ class SkeletonPubEnricher(ABC):
 
             not_last = depth < verbosityLevel
             if not_last:
-                print(
-                    "DEBUG: Level {} Pop {} Rec {}".format(
-                        depth,
-                        len(unique_to_ref_populate) + len(unique_to_reconcile),
-                        len(unique_to_reconcile),
-                    ),
-                    file=sys.stderr,
+                self.logger.debug(
+                    f"Level {depth} Pop {len(unique_to_ref_populate) + len(unique_to_reconcile)} Rec {len(unique_to_reconcile)}"
                 )
-                sys.stderr.flush()
 
                 # The ones to get both citations and references
                 for start in range(0, len(unique_to_reconcile), self.step_size):
@@ -1271,12 +1255,7 @@ class SkeletonPubEnricher(ABC):
                     del idmapped_slice
             else:
                 unique_to_ref_populate.extend(unique_to_reconcile)
-                if self._debug:
-                    print(
-                        "DEBUG: Last Pop {}".format(len(unique_to_ref_populate)),
-                        file=sys.stderr,
-                    )
-                    sys.stderr.flush()
+                self.logger.debug(f"Last Pop {len(unique_to_ref_populate)}")
 
             # The ones to get only references
             for start in range(0, len(unique_to_ref_populate), self.step_size):
@@ -1304,11 +1283,9 @@ class SkeletonPubEnricher(ABC):
             else:
                 break
 
-        if self._debug:
-            print("DEBUG: Saved {} publications".format(pub_counter), file=sys.stderr)
-            sys.stderr.flush()
+        self.logger.debug(f"Saved {pub_counter} publications")
 
-        # print("DEBUG: Residuals {} {} {} {} {}".format(get_size(saved_pubs),get_size(saved_comb),get_size(saved_comb_arr),get_size(query_refs),get_size(query_pubs)),file=sys.stderr)
+        # self.logger.debug("Residuals {} {} {} {} {}".format(get_size(saved_pubs),get_size(saved_comb),get_size(saved_comb_arr),get_size(query_refs),get_size(query_pubs)))
 
         # Last, save the manifest file
         manifest_file = os.path.join(results_path, "manifest.json")

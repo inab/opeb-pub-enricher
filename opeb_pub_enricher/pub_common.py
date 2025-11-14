@@ -4,7 +4,6 @@ import datetime
 import functools
 import http.client
 import re
-import sys
 import time
 import warnings
 
@@ -75,12 +74,6 @@ class Timestamps(object):
         theUTCDate: "datetime.datetime" = datetime.datetime.utcnow(),
     ) -> "datetime.datetime":
         return theUTCDate.replace(tzinfo=datetime.timezone.utc)
-
-
-def print_debug_url(module: "str", sourceURL: "str") -> "None":
-    print(
-        " ".join((module, str(Timestamps.LocalTimestamp()), sourceURL)), file=sys.stderr
-    )
 
 
 def pmid2curie(pubmed_id: "PubmedId") -> "CURIE":

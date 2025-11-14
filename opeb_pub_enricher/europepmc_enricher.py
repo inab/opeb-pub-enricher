@@ -1,6 +1,5 @@
 #!/usr/bin/python
 
-import sys
 import time
 import math
 import re
@@ -64,7 +63,6 @@ class EuropePMCEnricher(AbstractPubEnricher):
         cache: "str",
         prefix: "Optional[str]" = None,
         config: "Optional[configparser.ConfigParser]" = None,
-        debug: "bool" = False,
         doi_checker: "Optional[DOIChecker]" = None,
     ): ...
 
@@ -74,7 +72,6 @@ class EuropePMCEnricher(AbstractPubEnricher):
         cache: "PubDBCache",
         prefix: "Optional[str]" = None,
         config: "Optional[configparser.ConfigParser]" = None,
-        debug: "bool" = False,
         doi_checker: "Optional[DOIChecker]" = None,
     ): ...
 
@@ -83,14 +80,13 @@ class EuropePMCEnricher(AbstractPubEnricher):
         cache: "Union[str, PubDBCache]",
         prefix: "Optional[str]" = None,
         config: "Optional[configparser.ConfigParser]" = None,
-        debug: "bool" = False,
         doi_checker: "Optional[DOIChecker]" = None,
     ):
         # self.debug_cache_dir = os.path.join(cache_dir,'debug')
         # os.makedirs(os.path.abspath(self.debug_cache_dir),exist_ok=True)
         # self._debug_count = 0
 
-        super().__init__(cache, prefix, config, debug, doi_checker)
+        super().__init__(cache, prefix=prefix, config=config, doi_checker=doi_checker)
 
         # The section name is the symbolic name given to this class
         section_name = self.Name()
@@ -319,12 +315,8 @@ class EuropePMCEnricher(AbstractPubEnricher):
                         pubYear = result.get("pubYear")
                         if pubYear is not None:
                             pubYear = int(pubYear)
-                        elif self._debug:
-                            print(
-                                "DEBUG EuropePMC {} {}".format(source_id, _id),
-                                file=sys.stderr,
-                            )
-                            sys.stderr.flush()
+                        else:
+                            self.logger.debug(f"EuropePMC {source_id} {_id}")
                         mapping: "IdMapping" = {
                             "id": _id,
                             "title": result.get("title"),
@@ -338,9 +330,9 @@ class EuropePMCEnricher(AbstractPubEnricher):
                         }
 
                         mappings.append(mapping)
-            # print(json.dumps(entries,indent=4))
+            # self.logger.debug(json.dumps(entries,indent=4))
 
-        # json.dump(mappings,sys.stderr,indent=4,sort_keys=True)
+        # self.logger.debug(json.dumps(mappings,indent=4,sort_keys=True))
         # sys.exit(1)
 
         return mappings

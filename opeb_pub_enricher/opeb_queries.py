@@ -1,13 +1,13 @@
 #!/usr/bin/python
 
-import sys
+import inspect
 import json
+import logging
+import lzma
 from urllib import request
 from urllib.error import (
     URLError,
 )
-import traceback
-import lzma
 
 from . import pub_common
 
@@ -68,6 +68,13 @@ class OpenEBenchQueries(object):
         load_opeb_filename: "Optional[str]" = None,
         save_opeb_filename: "Optional[str]" = None,
     ):
+        # Getting a logger focused on specific classes
+        self.logger = logging.getLogger(
+            dict(inspect.getmembers(self))["__module__"]
+            + "::"
+            + self.__class__.__name__
+        )
+
         self.load_opeb_filename = load_opeb_filename
         self.save_opeb_filename = save_opeb_filename
 
@@ -142,17 +149,11 @@ class OpenEBenchQueries(object):
             return self.parseOpenEBench(retval)
 
         except URLError as ue:
-            print("ERROR: could not fetch {0}".format(sourceURL), file=sys.stderr)
-            traceback.print_exc(file=sys.stderr)
-            sys.stderr.flush()
+            self.logger.exception("could not fetch {0}".format(sourceURL))
             raise ue
         except json.JSONDecodeError as jde:
-            print("ERROR: Bad-formed JSON: " + jde.msg, file=sys.stderr)
-            sys.stderr.flush()
+            self.logger.error("Bad-formed JSON: " + jde.msg)
             raise jde
         except Exception as anyEx:
-            print("Something unexpected happened in fetchPubIds", file=sys.stderr)
-            print(anyEx, file=sys.stderr)
-            traceback.print_exc(file=sys.stderr)
-            sys.stderr.flush()
+            self.logger.exception("Something unexpected happened in fetchPubIds")
             raise anyEx

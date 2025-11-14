@@ -2,7 +2,9 @@
 # -*- coding: utf-8 -*-
 
 import datetime
+import inspect
 import json
+import logging
 import os
 import sqlite3
 import zlib
@@ -191,6 +193,13 @@ class PubDBCache(object):
         prefix: "Optional[str]" = None,
         doi_checker: "Optional[DOIChecker]" = None,
     ):
+        # Getting a logger focused on specific classes
+        self.logger = logging.getLogger(
+            dict(inspect.getmembers(self))["__module__"]
+            + "::"
+            + self.__class__.__name__
+        )
+
         # The enricher name, used as default for all the queries
         self.enricher_name = enricher_name
         self.cache_dir = cache_dir
