@@ -3,6 +3,7 @@
 import datetime
 import functools
 import http.client
+import os
 import re
 import time
 import warnings
@@ -14,6 +15,7 @@ if TYPE_CHECKING:
         Any,
         Callable,
         Final,
+        Iterator,
         NewType,
         Optional,
         Pattern,
@@ -150,3 +152,25 @@ def deprecated(func: "Callable[..., RT]") -> "Callable[..., RT]":
         return func(*args, **kwargs)
 
     return new_func
+
+
+# Next method has been borrowed from FlowMaps
+def scantree(path: "Union[str, os.PathLike[str]]") -> "Iterator[os.DirEntry[str]]":
+    """Recursively yield DirEntry objects for given directory."""
+
+    hasDirs = False
+    for entry in os.scandir(path):
+        # We are avoiding to enter in loops around '.' and '..'
+        if entry.is_dir(follow_symlinks=False):
+            if entry.name[0] != ".":
+                hasDirs = True
+        else:
+            yield entry
+
+    # We are leaving the dirs to the end
+    if hasDirs:
+        for entry in os.scandir(path):
+            # We are avoiding to enter in loops around '.' and '..'
+            if entry.is_dir(follow_symlinks=False) and entry.name[0] != ".":
+                yield entry
+                yield from scantree(entry.path)
