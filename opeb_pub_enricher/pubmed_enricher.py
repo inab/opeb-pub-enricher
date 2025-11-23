@@ -74,6 +74,7 @@ class PubmedEnricher(AbstractPubEnricher):
         prefix: "Optional[str]" = None,
         config: "Optional[configparser.ConfigParser]" = None,
         doi_checker: "Optional[DOIChecker]" = None,
+        is_db_synchronous: "bool" = True,
     ): ...
 
     @overload
@@ -83,6 +84,7 @@ class PubmedEnricher(AbstractPubEnricher):
         prefix: "Optional[str]" = None,
         config: "Optional[configparser.ConfigParser]" = None,
         doi_checker: "Optional[DOIChecker]" = None,
+        is_db_synchronous: "bool" = True,
     ): ...
 
     def __init__(
@@ -91,12 +93,19 @@ class PubmedEnricher(AbstractPubEnricher):
         prefix: "Optional[str]" = None,
         config: "Optional[configparser.ConfigParser]" = None,
         doi_checker: "Optional[DOIChecker]" = None,
+        is_db_synchronous: "bool" = True,
     ):
         # self.debug_cache_dir = os.path.join(cache_dir,'debug')
         # os.makedirs(os.path.abspath(self.debug_cache_dir),exist_ok=True)
         # self._debug_count = 0
 
-        super().__init__(cache, prefix=prefix, config=config, doi_checker=doi_checker)
+        super().__init__(
+            cache,
+            prefix=prefix,
+            config=config,
+            doi_checker=doi_checker,
+            is_db_synchronous=is_db_synchronous,
+        )
 
         # The section name is the symbolic name given to this class
         section_name = self.Name()

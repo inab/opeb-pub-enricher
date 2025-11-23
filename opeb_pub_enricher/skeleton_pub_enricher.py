@@ -140,6 +140,7 @@ class SkeletonPubEnricher(ABC):
         prefix: "Optional[str]" = None,
         config: "Optional[configparser.ConfigParser]" = None,
         doi_checker: "Optional[DOIChecker]" = None,
+        is_db_synchronous: "bool" = True,
     ): ...
 
     @overload
@@ -149,6 +150,7 @@ class SkeletonPubEnricher(ABC):
         prefix: "Optional[str]" = None,
         config: "Optional[configparser.ConfigParser]" = None,
         doi_checker: "Optional[DOIChecker]" = None,
+        is_db_synchronous: "bool" = True,
     ): ...
 
     def __init__(
@@ -157,6 +159,7 @@ class SkeletonPubEnricher(ABC):
         prefix: "Optional[str]" = None,
         config: "Optional[configparser.ConfigParser]" = None,
         doi_checker: "Optional[DOIChecker]" = None,
+        is_db_synchronous: "bool" = True,
     ):
         # Getting a logger focused on specific classes
         self.logger = logging.getLogger(
@@ -189,6 +192,7 @@ class SkeletonPubEnricher(ABC):
                 cache_dir=self.cache_dir,
                 prefix=cache_prefix,
                 doi_checker=doi_checker,
+                is_db_synchronous=is_db_synchronous,
             )
         else:
             self.pubC = cache

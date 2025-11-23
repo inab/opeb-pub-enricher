@@ -194,6 +194,7 @@ class MetaEnricher(SkeletonPubEnricher):
         prefix: "Optional[str]" = None,
         config: "Optional[configparser.ConfigParser]" = None,
         doi_checker: "Optional[DOIChecker]" = None,
+        is_db_synchronous: "bool" = True,
     ): ...
 
     @overload
@@ -203,6 +204,7 @@ class MetaEnricher(SkeletonPubEnricher):
         prefix: "Optional[str]" = None,
         config: "Optional[configparser.ConfigParser]" = None,
         doi_checker: "Optional[DOIChecker]" = None,
+        is_db_synchronous: "bool" = True,
     ): ...
 
     def __init__(
@@ -211,6 +213,7 @@ class MetaEnricher(SkeletonPubEnricher):
         prefix: "Optional[str]" = None,
         config: "Optional[configparser.ConfigParser]" = None,
         doi_checker: "Optional[DOIChecker]" = None,
+        is_db_synchronous: "bool" = True,
     ):
         # self.debug_cache_dir = os.path.join(cache_dir,'debug')
         # os.makedirs(os.path.abspath(self.debug_cache_dir),exist_ok=True)
@@ -249,7 +252,12 @@ class MetaEnricher(SkeletonPubEnricher):
                 # Each value is an instance of AbstractPubEnricher
                 # enrichers[enricher_name] = enricher_class(cache,prefix,config)
                 ep, eqs, eqr = _multiprocess_wrapper(
-                    enricher_class, cache_dir, prefix, config, doi_checker
+                    enricher_class,
+                    cache_dir,
+                    prefix,
+                    config,
+                    doi_checker,
+                    is_db_synchronous,
                 )
 
                 enrichers_pool[enricher_name] = (ep, eqs, eqr, enricher_name)
@@ -265,12 +273,17 @@ class MetaEnricher(SkeletonPubEnricher):
                 cache_dir=cache_dir,
                 prefix=meta_prefix,
                 doi_checker=doi_checker,
+                is_db_synchronous=is_db_synchronous,
             )
         else:
             pubC = cache
 
         super().__init__(
-            pubC, prefix=meta_prefix, config=config, doi_checker=doi_checker
+            pubC,
+            prefix=meta_prefix,
+            config=config,
+            doi_checker=doi_checker,
+            is_db_synchronous=is_db_synchronous,
         )
 
         self.enrichers_pool = enrichers_pool
