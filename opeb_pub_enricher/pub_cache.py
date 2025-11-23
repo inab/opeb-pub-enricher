@@ -192,6 +192,7 @@ class PubDBCache(object):
         cache_dir: "str" = ".",
         prefix: "Optional[str]" = None,
         doi_checker: "Optional[DOIChecker]" = None,
+        is_db_synchronous: "bool" = True,
     ):
         # Getting a logger focused on specific classes
         self.logger = logging.getLogger(
@@ -203,6 +204,7 @@ class PubDBCache(object):
         # The enricher name, used as default for all the queries
         self.enricher_name = enricher_name
         self.cache_dir = cache_dir
+        self.is_db_synchronous = is_db_synchronous
 
         if doi_checker is None:
             doi_checker = DOIChecker(cache_dir)
@@ -238,6 +240,10 @@ class PubDBCache(object):
         )
         self.conn.execute("""PRAGMA locking_mode = NORMAL""")
         self.conn.execute("""PRAGMA journal_mode = WAL""")
+        self.conn.execute(
+            f"""PRAGMA synchronous = {"NORMAL" if self.is_db_synchronous else "OFF"}"""
+        )
+        self.conn.execute(f"""PRAGMA journal_size_limit = {64 * 1024 * 1024}""")
 
         # Database structures
         with self.conn:
@@ -265,7 +271,7 @@ CREATE TABLE idmap (
 	source VARCHAR(32) NOT NULL,
 	last_fetched TIMESTAMP NOT NULL,
 	PRIMARY KEY (pub_id,id,enricher,source),
-	FOREIGN KEY (enricher,id,source) REFERENCES pub(enricher,id,source)
+	FOREIGN KEY (enricher,id,source) REFERENCES pub(enricher,id,source) ON DELETE CASCADE ON UPDATE CASCADE
 )
 """)
                 # Denormalized citations and references
@@ -279,7 +285,7 @@ CREATE TABLE citref (
 	is_cit BOOLEAN NOT NULL,
 	payload BLOB,
 	last_fetched TIMESTAMP NOT NULL,
-	FOREIGN KEY (enricher,id,source) REFERENCES pub(enricher,id,source)
+	FOREIGN KEY (enricher,id,source) REFERENCES pub(enricher,id,source) ON DELETE CASCADE ON UPDATE CASCADE
 )
 """)
                 # Index on the enricher, id and source
@@ -296,8 +302,8 @@ CREATE TABLE lower_map (
 	lower_id VARCHAR(4096) NOT NULL,
 	lower_source VARCHAR(32) NOT NULL,
 	last_fetched TIMESTAMP NOT NULL,
-	FOREIGN KEY (enricher,id,source) REFERENCES pub(enricher,id,source),
-	FOREIGN KEY (lower_enricher,lower_id,lower_source) REFERENCES pub(enricher,id,source)
+	FOREIGN KEY (enricher,id,source) REFERENCES pub(enricher,id,source) ON DELETE CASCADE ON UPDATE CASCADE,
+	FOREIGN KEY (lower_enricher,lower_id,lower_source) REFERENCES pub(enricher,id,source) ON DELETE CASCADE ON UPDATE CASCADE
 )
 """)
                 # Index on the lower mapping
@@ -359,6 +365,64 @@ is_cit = :is_cit
                 else:
                     yield None
 
+    def clearCitRefs(
+        self,
+        qualid_list: "Iterable[Tuple[QualifiedId, bool]]",
+    ) -> "None":
+        with self.conn:
+            cur = self.conn.cursor()
+
+            # Remove
+            cur.executemany(
+                """
+DELETE FROM citref
+WHERE enricher = :enricher
+AND id = :id
+AND source = :source
+AND is_cit = :is_cit
+""",
+                (
+                    {
+                        "enricher": self.enricher_name,
+                        "source": qual_id[0],
+                        "id": qual_id[1],
+                        "is_cit": is_cit,
+                    }
+                    for qual_id, is_cit in qualid_list
+                ),
+            )
+
+    def setCitRefs_ll(
+        self,
+        citref_list: "Iterable[Union[Tuple[QualifiedId,Sequence[Citation], Literal[True]], Tuple[QualifiedId, Sequence[Reference], Literal[False]]]]",
+        timestamp: "datetime.datetime" = Timestamps.UTCTimestamp(),
+    ) -> "None":
+        with self.conn:
+            cur = self.conn.cursor()
+
+            # Then, insert
+            cur.executemany(
+                """
+INSERT INTO citref(enricher,id,source,is_cit,payload,last_fetched) VALUES(:enricher,:id,:source,:is_cit,:payload,:last_fetched)
+""",
+                (
+                    {
+                        "enricher": self.enricher_name,
+                        "source": qual_id[0],
+                        "id": qual_id[1],
+                        "is_cit": is_cit,
+                        "payload": zlib.compress(
+                            self.je.encode(citrefs).encode("utf-8"),
+                            zlib.Z_BEST_COMPRESSION,
+                        )
+                        if citrefs is not None
+                        else None,
+                        "last_fetched": timestamp,
+                    }
+                    for qual_id, citrefs, is_cit in citref_list
+                ),
+            )
+
     def setCitRefs(
         self,
         citref_list: "Iterable[Union[Tuple[QualifiedId,Sequence[Citation], Literal[True]], Tuple[QualifiedId, Sequence[Reference], Literal[False]]]]",
@@ -366,8 +430,8 @@ is_cit = :is_cit
     ) -> None:
         with self.conn:
             cur = self.conn.cursor()
-            for qual_id, citrefs, is_cit in citref_list:
-                params: "CitRefMapping" = {
+            params_list = [
+                {
                     "enricher": self.enricher_name,
                     "source": qual_id[0],
                     "id": qual_id[1],
@@ -379,26 +443,28 @@ is_cit = :is_cit
                     else None,
                     "last_fetched": timestamp,
                 }
+                for qual_id, citrefs, is_cit in citref_list
+            ]
 
-                # First, remove
-                cur.execute(
-                    """
+            # First, remove
+            cur.executemany(
+                """
 DELETE FROM citref
 WHERE enricher = :enricher
 AND id = :id
 AND source = :source
 AND is_cit = :is_cit
 """,
-                    params,
-                )
+                params_list,
+            )
 
-                # Then, insert
-                cur.execute(
-                    """
+            # Then, insert
+            cur.executemany(
+                """
 INSERT INTO citref(enricher,id,source,is_cit,payload,last_fetched) VALUES(:enricher,:id,:source,:is_cit,:payload,:last_fetched)
 """,
-                    params,
-                )
+                params_list,
+            )
 
     def getCitationsAndCount(
         self, qualified_id: "QualifiedId"
@@ -410,6 +476,19 @@ INSERT INTO citref(enricher,id,source,is_cit,payload,last_fetched) VALUES(:enric
                 break
 
         return None, None
+
+    def setCitationsBatch(
+        self,
+        citations_batch: "Iterable[Tuple[QualifiedId, Sequence[Citation]]]",
+        timestamp: "datetime.datetime" = Timestamps.UTCTimestamp(),
+    ) -> None:
+        self.setCitRefs(
+            (
+                (qualified_id, citations, True)
+                for qualified_id, citations in citations_batch
+            ),
+            timestamp,
+        )
 
     def setCitationsAndCount(
         self,
@@ -430,6 +509,19 @@ INSERT INTO citref(enricher,id,source,is_cit,payload,last_fetched) VALUES(:enric
                 break
 
         return None, None
+
+    def setReferencesBatch(
+        self,
+        references_batch: "Iterable[Tuple[QualifiedId, Sequence[Reference]]]",
+        timestamp: "datetime.datetime" = Timestamps.UTCTimestamp(),
+    ) -> None:
+        self.setCitRefs(
+            (
+                (qualified_id, references, False)
+                for qualified_id, references in references_batch
+            ),
+            timestamp,
+        )
 
     def setReferencesAndCount(
         self,
@@ -562,22 +654,13 @@ pub_id = :pub_id
 
     def appendSourceIds_TL(
         self,
-        publish_id_iter: "Iterable[PublishId]",
-        source_id: "SourceId",
-        _id: "UnqualifiedId",
+        append_source_ids_batch: "Sequence[Tuple[Sequence[PublishId], SourceId, UnqualifiedId]]",
         timestamp: "datetime.datetime" = Timestamps.UTCTimestamp(),
     ) -> "None":
         cur = self.conn.cursor()
 
-        params = {
-            "enricher": self.enricher_name,
-            "id": _id,
-            "source": source_id,
-            "last_fetched": timestamp,
-        }
-
         # In case of stale cache, remove all
-        cur.execute(
+        cur.executemany(
             """
 DELETE FROM idmap
 WHERE enricher = :enricher
@@ -585,36 +668,42 @@ AND id = :id
 AND source = :source
 AND DATETIME('NOW','-{} DAYS') > last_fetched
 """.format(CACHE_DAYS),
-            params,
+            (
+                {
+                    "enricher": self.enricher_name,
+                    "id": _id,
+                    "source": source_id,
+                }
+                for publish_id_iter, source_id, _id in append_source_ids_batch
+            ),
         )
 
         # Now, try storing specifically these
-        for publish_id in publish_id_iter:
-            params["pub_id"] = publish_id
-
-            cur.execute(
-                """
+        cur.executemany(
+            """
 INSERT INTO idmap(pub_id,enricher,id,source,last_fetched) VALUES(:pub_id,:enricher,:id,:source,:last_fetched)
 """,
-                params,
-            )
+            (
+                {
+                    "enricher": self.enricher_name,
+                    "last_fetched": timestamp,
+                    "id": _id,
+                    "source": source_id,
+                    "pub_id": publish_id,
+                }
+                for publish_id_iter, source_id, _id in append_source_ids_batch
+                for publish_id in publish_id_iter
+            ),
+        )
 
     def removeSourceIds_TL(
         self,
-        publish_id_iter: "Iterable[PublishId]",
-        source_id: "SourceId",
-        _id: "UnqualifiedId",
+        remove_source_ids_batch: "Sequence[Tuple[Sequence[PublishId], SourceId, UnqualifiedId]]",
     ) -> "None":
         cur = self.conn.cursor()
 
-        params: "RemoveSourceEnricherQuery" = {
-            "enricher": self.enricher_name,
-            "id": _id,
-            "source": source_id,
-        }
-
         # In case of stale cache, remove all
-        cur.execute(
+        cur.executemany(
             """
 DELETE FROM idmap
 WHERE enricher = :enricher
@@ -622,23 +711,36 @@ AND id = :id
 AND source = :source
 AND DATETIME('NOW','-{} DAYS') > last_fetched
 """.format(CACHE_DAYS),
-            params,
+            (
+                {
+                    "enricher": self.enricher_name,
+                    "id": _id,
+                    "source": source_id,
+                }
+                for publish_id_iter, source_id, _id in remove_source_ids_batch
+            ),
         )
 
         # Now, try removing specifically these
-        for publish_id in publish_id_iter:
-            params["pub_id"] = publish_id
-
-            cur.execute(
-                """
+        cur.executemany(
+            """
 DELETE FROM idmap
 WHERE enricher = :enricher
 AND id = :id
 AND source = :source
 AND pub_id = :pub_id
 """,
-                params,
-            )
+            (
+                {
+                    "enricher": self.enricher_name,
+                    "id": _id,
+                    "source": source_id,
+                    "pub_id": publish_id,
+                }
+                for publish_id_iter, source_id, _id in remove_source_ids_batch
+                for publish_id in publish_id_iter
+            ),
+        )
 
     def getRawCachedMappingsFromPartial(
         self, partial_mapping: "PartialIdMappingMinimal"
@@ -806,17 +908,20 @@ AND DATETIME('NOW','-{} DAYS') > last_fetched
         )
 
         # Now, try storing specifically these
-        for lower_enricher, lower_source, lower_id in lower_iter:
-            params["lower_enricher"] = lower_enricher
-            params["lower_source"] = lower_source
-            params["lower_id"] = lower_id
-
-            cur.execute(
-                """
+        cur.executemany(
+            """
 INSERT INTO lower_map(enricher,id,source,lower_enricher,lower_id,lower_source,last_fetched) VALUES(:enricher,:id,:source,:lower_enricher,:lower_id,:lower_source,:last_fetched)
 """,
-                params,
-            )
+            (
+                {
+                    "lower_enricher": lower_enricher,
+                    "lower_source": lower_source,
+                    "lower_id": lower_id,
+                    **params,
+                }
+                for lower_enricher, lower_source, lower_id in lower_iter
+            ),
+        )
 
     def removeMetaSourceIds_TL(
         self,
@@ -841,13 +946,8 @@ AND DATETIME('NOW','-{} DAYS') > last_fetched
         )
 
         # Now, try removing specifically these
-        for lower_enricher, lower_source, lower_id in lower_iter:
-            params["lower_enricher"] = lower_enricher
-            params["lower_source"] = lower_source
-            params["lower_id"] = lower_id
-
-            cur.execute(
-                """
+        cur.executemany(
+            """
 DELETE FROM lower_map
 WHERE enricher = :enricher
 AND id = :id
@@ -856,53 +956,91 @@ AND lower_enricher = :lower_enricher
 AND lower_id = :lower_id
 AND lower_source = :lower_source
 """,
-                params,
-            )
+            (
+                {
+                    "lower_enricher": lower_enricher,
+                    "lower_source": lower_source,
+                    "lower_id": lower_id,
+                    **params,
+                }
+                for lower_enricher, lower_source, lower_id in lower_iter
+            ),
+        )
 
     def setCachedMappings(
         self,
-        mapping_iter: "Iterable[IdMapping]",
+        mappings: "Sequence[IdMapping]",
         mapping_timestamp: "datetime.datetime" = Timestamps.UTCTimestamp(),
     ) -> "None":
-        for mapping in mapping_iter:
-            # Before anything, get the previous mapping before updating it
-            _id = mapping["id"]
-            source_id = mapping["source"]
+        """
+        WARNING: a UNIQUE constraint is fired if more than one mapping
+        has the very same identifiers
+        """
+        if self.logger.getEffectiveLevel() <= logging.DEBUG:
+            seen = set()
+            dupes = set()
 
-            with self.conn:
-                old_mapping_timestamp, old_mapping = self.getRawCachedMapping_TL(
-                    (source_id, _id)
+            for x in (mapping["id"] for mapping in mappings):
+                if x in seen:
+                    dupes.add(x)
+                else:
+                    seen.add(x)
+
+            if len(seen) > 0 and len(dupes) > 0:
+                self.logger.error(f"Dups: {dupes}")
+
+        with self.conn:
+            # Before anything, get the previous mappings before updating them
+            old_mappings = [
+                old_mapping
+                for old_mapping_timestamp, old_mapping in self.getRawCachedMappings_TL(
+                    ((mapping["source"], mapping["id"]) for mapping in mappings)
                 )
-
-                cur = self.conn.cursor()
-                params = {
-                    "enricher": mapping.get("enricher", self.enricher_name),
-                    "source": mapping["source"],
-                    "id": mapping["id"],
-                    "payload": zlib.compress(
-                        self.je.encode(mapping).encode("utf-8"), zlib.Z_BEST_COMPRESSION
-                    ),
-                    "last_fetched": mapping_timestamp,
-                }
-
-                # First, remove all the data from the previous mappings
-                cur.execute(
-                    """
+            ]
+            # First, remove all the data from the previous mappings
+            cur = self.conn.cursor()
+            cur.executemany(
+                """
 DELETE FROM pub
 WHERE enricher = :enricher
 AND id = :id
 AND source = :source
 """,
-                    params,
-                )
-
-                # Then, insert
-                cur.execute(
-                    """
+                (
+                    {
+                        "enricher": mapping.get("enricher", self.enricher_name),
+                        "source": mapping["source"],
+                        "id": mapping["id"],
+                    }
+                    for mapping in mappings
+                ),
+            )
+            # Then, insert them
+            cur.executemany(
+                """
 INSERT INTO pub(enricher,id,source,payload,last_fetched) VALUES(:enricher,:id,:source,:payload,:last_fetched)
 """,
-                    params,
-                )
+                (
+                    {
+                        "enricher": mapping.get("enricher", self.enricher_name),
+                        "source": mapping["source"],
+                        "id": mapping["id"],
+                        "payload": zlib.compress(
+                            self.je.encode(mapping).encode("utf-8"),
+                            zlib.Z_BEST_COMPRESSION,
+                        ),
+                        "last_fetched": mapping_timestamp,
+                    }
+                    for mapping in mappings
+                ),
+            )
+
+            remove_source_ids_batch = []
+            append_source_ids_batch = []
+            for old_mapping, mapping in zip(old_mappings, mappings):
+                # Before anything, get the previous mapping before updating it
+                _id = mapping["id"]
+                source_id = mapping["source"]
 
                 # Then, cleanup of sourceIds cache
                 pubmed_id = mapping.get("pmid")
@@ -940,14 +1078,20 @@ INSERT INTO pub(enricher,id,source,payload,last_fetched) VALUES(:enricher,:id,:s
                         appendable_ids.append(new_id)
 
                 if removable_ids:
-                    self.removeSourceIds_TL(removable_ids, source_id, _id)
+                    remove_source_ids_batch.append((removable_ids, source_id, _id))
                 if appendable_ids:
-                    self.appendSourceIds_TL(
-                        appendable_ids, source_id, _id, timestamp=mapping_timestamp
-                    )
+                    append_source_ids_batch.append((appendable_ids, source_id, _id))
 
-                # Let's manage also the lower mappings, from base_pubs
+            if len(remove_source_ids_batch) > 0:
+                self.removeSourceIds_TL(remove_source_ids_batch)
 
+            if len(append_source_ids_batch) > 0:
+                self.appendSourceIds_TL(
+                    append_source_ids_batch, timestamp=mapping_timestamp
+                )
+
+            # Let's manage also the lower mappings, from base_pubs
+            for old_mapping, mapping in zip(old_mappings, mappings):
                 # Creating the sets
                 oldLowerSet = set()
                 if old_mapping:
@@ -976,11 +1120,15 @@ INSERT INTO pub(enricher,id,source,payload,last_fetched) VALUES(:enricher,:id,:s
 
                 # This set has the entries to be removed
                 toRemoveSet = oldLowerSet - newLowerSet
-                self.removeMetaSourceIds_TL(toRemoveSet, source_id, _id)
+                if len(toRemoveSet) > 0:
+                    self.removeMetaSourceIds_TL(toRemoveSet, source_id, _id)
 
                 # This set has the entries to be added
                 toAddSet = newLowerSet - oldLowerSet
-                self.appendMetaSourceIds_TL(toAddSet, source_id, _id, mapping_timestamp)
+                if len(toAddSet) > 0:
+                    self.appendMetaSourceIds_TL(
+                        toAddSet, source_id, _id, mapping_timestamp
+                    )
 
     def setCachedMapping(
         self,
@@ -988,3 +1136,90 @@ INSERT INTO pub(enricher,id,source,payload,last_fetched) VALUES(:enricher,:id,:s
         mapping_timestamp: "datetime.datetime" = Timestamps.UTCTimestamp(),
     ) -> None:
         self.setCachedMappings([mapping], mapping_timestamp)
+
+    def removeCachedMappings(
+        self,
+        mappings: "Sequence[IdMapping]",
+    ) -> "None":
+        with self.conn:
+            # Before anything, get the previous mappings before updating them
+            old_mappings = [
+                old_mapping
+                for old_mapping_timestamp, old_mapping in self.getRawCachedMappings_TL(
+                    ((mapping["source"], mapping["id"]) for mapping in mappings)
+                )
+            ]
+            # First, remove all the data from the previous mappings
+            cur = self.conn.cursor()
+            cur.executemany(
+                """
+DELETE FROM pub
+WHERE enricher = :enricher
+AND id = :id
+AND source = :source
+""",
+                (
+                    {
+                        "enricher": mapping.get("enricher", self.enricher_name),
+                        "source": mapping["source"],
+                        "id": mapping["id"],
+                    }
+                    for mapping in mappings
+                ),
+            )
+
+            remove_source_ids_batch = []
+            for old_mapping, mapping in zip(old_mappings, mappings):
+                # Before anything, get the previous mapping before updating it
+                _id = mapping["id"]
+                source_id = mapping["source"]
+
+                old_pubmed_id: "Optional[PubmedId]" = None
+                old_doi_id: "Optional[DOIId]" = None
+                old_pmc_id: "Optional[PMCId]" = None
+                if old_mapping is not None:
+                    old_pubmed_id = old_mapping.get("pmid")
+                    old_doi_id = old_mapping.get("doi")
+                    old_pmc_id = old_mapping.get("pmcid")
+                old_doi_id_norm = (
+                    self.doi_checker.normalize_doi(old_doi_id) if old_doi_id else None
+                )
+                old_pmc_id_norm = (
+                    pub_common.normalize_pmcid(old_pmc_id) if old_pmc_id else None
+                )
+
+                removable_ids = []
+                for old_id in [
+                    old_pubmed_id,
+                    old_doi_id_norm,
+                    old_pmc_id_norm,
+                ]:
+                    # Code needed for mismatches
+                    if old_id is not None:
+                        removable_ids.append(old_id)
+
+                if removable_ids:
+                    remove_source_ids_batch.append((removable_ids, source_id, _id))
+
+            if len(remove_source_ids_batch) > 0:
+                self.removeSourceIds_TL(remove_source_ids_batch)
+
+            # Let's manage also the lower mappings, from base_pubs
+            for old_mapping in old_mappings:
+                # Creating the sets
+                oldLowerSet = set()
+                if old_mapping:
+                    old_base_pubs = old_mapping.get("base_pubs", [])
+                    for old_lower in old_base_pubs:
+                        if old_lower.get("id"):
+                            oldLowerSet.add(
+                                (
+                                    old_lower["enricher"],
+                                    old_lower["source"],
+                                    old_lower["id"],
+                                )
+                            )
+
+                # This set has the entries to be removed
+                if len(oldLowerSet) > 0:
+                    self.removeMetaSourceIds_TL(oldLowerSet, source_id, _id)
