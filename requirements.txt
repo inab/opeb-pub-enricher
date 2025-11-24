@@ -1,2 +1,5 @@
 configparser; python_version < '3.0'
 SPARQLWrapper
+binary-lftp @ git+https://github.com/jmfernandez/binary-lftp.git
+diskcache
+lxml

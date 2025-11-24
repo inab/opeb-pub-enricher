@@ -1,1 +1,3 @@
 types-setuptools
+lxml-stubs
+diskcache-stubs
