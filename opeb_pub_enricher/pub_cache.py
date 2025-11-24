@@ -260,6 +260,10 @@ CREATE TABLE pub (
 	PRIMARY KEY (enricher,id,source)
 )
 """)
+                # Index on the last_fetched
+                cur.execute("""
+CREATE INDEX pub_l_f ON pub(last_fetched)
+""")
                 # IDMap
                 # pub_id_type VARCHAR(32) NOT NULL,
                 # PRIMARY KEY (pub_id,pub_id_type),
@@ -273,6 +277,10 @@ CREATE TABLE idmap (
 	PRIMARY KEY (pub_id,id,enricher,source),
 	FOREIGN KEY (enricher,id,source) REFERENCES pub(enricher,id,source) ON DELETE CASCADE ON UPDATE CASCADE
 )
+""")
+                # Index on the last_fetched
+                cur.execute("""
+CREATE INDEX idmap_l_f ON idmap(last_fetched)
 """)
                 # Denormalized citations and references
                 # so we can register empty answers,
@@ -292,6 +300,10 @@ CREATE TABLE citref (
                 cur.execute("""
 CREATE INDEX citref_e_i_s ON citref(enricher,id,source)
 """)
+                # Index on the last_fetched
+                cur.execute("""
+CREATE INDEX citref_l_f ON citref(last_fetched)
+""")
                 # Lower Mappings
                 cur.execute("""
 CREATE TABLE lower_map (
@@ -309,6 +321,10 @@ CREATE TABLE lower_map (
                 # Index on the lower mapping
                 cur.execute("""
 CREATE INDEX lower_map_e_i_s ON lower_map(lower_enricher,lower_id,lower_source)
+""")
+                # Index on the last_fetched
+                cur.execute("""
+CREATE INDEX lower_map_l_f ON lower_map(last_fetched)
 """)
             cur.close()
 
