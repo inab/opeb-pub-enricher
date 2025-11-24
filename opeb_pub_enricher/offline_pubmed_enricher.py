@@ -117,8 +117,9 @@ class OfflinePubmedEnricher(AbstractPubEnricher):
         dir_entries = self._mirror_pubmed()
 
         if len(dir_entries) > 0:
-            self._digest_pubmed_dir_entries(dir_entries)
-            # pass
+            with self.pubC:
+                self._digest_pubmed_dir_entries(dir_entries)
+                # pass
 
     # Do not change these constants!!!
     OFFLINE_PUBMED_SOURCE: "Final[EnricherId]" = cast("EnricherId", "offline_pubmed")
