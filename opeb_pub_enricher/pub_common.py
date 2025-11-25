@@ -77,6 +77,11 @@ class Timestamps(object):
     ) -> "datetime.datetime":
         return theUTCDate.replace(tzinfo=datetime.timezone.utc)
 
+    @functools.cache
+    @staticmethod
+    def BiggestTimestamp() -> "datetime.datetime":
+        return Timestamps.UTCTimestamp(datetime.datetime.max)
+
 
 def pmid2curie(pubmed_id: "PubmedId") -> "CURIE":
     return "pmid:" + str(pubmed_id)

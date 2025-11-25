@@ -242,7 +242,8 @@ quit
                     True,
                 )
                 for pmid in citations_cache
-            )
+            ),
+            timestamp=pub_common.Timestamps.BiggestTimestamp(),
         )
 
         # citations_cache.clear()
@@ -254,7 +255,9 @@ quit
     ) -> "None":
         """Note: the batch must have unique values"""
         self.pubC.setCachedMappings(
-            [mapping for mapping, references in mappings_batch.values()]
+            [mapping for mapping, references in mappings_batch.values()],
+            mapping_timestamp=pub_common.Timestamps.BiggestTimestamp(),
+            delete_stale_cache=False,
         )
 
         the_source_id = cast("SourceId", self.PUBMED_SOURCE)
@@ -279,7 +282,8 @@ quit
                     False,
                 )
                 for mapping, references in mappings_batch.values()
-            )
+            ),
+            timestamp=pub_common.Timestamps.BiggestTimestamp(),
         )
         # And saving the reverse ones
         pre_citations: "MutableMapping[UnqualifiedId, MutableSequence[UnqualifiedId]]" = dict()
@@ -386,7 +390,8 @@ quit
                                 "source": the_source_id,
                             }
                             for p_elem in elem
-                        ]
+                        ],
+                        delete_stale_cache=False,
                     )
                     self.pubC.clearCitRefs(
                         (

@@ -248,7 +248,9 @@ class SkeletonPubEnricher(ABC):
         pass
 
     def cachedQueryPubIds(
-        self, query_list: "Sequence[QueryId]"
+        self,
+        query_list: "Sequence[QueryId]",
+        delete_stale_cache: "bool" = True,
     ) -> "Sequence[IdMapping]":
         """
         Caching version of queryPubIdsBatch.
@@ -352,7 +354,9 @@ class SkeletonPubEnricher(ABC):
                     if gathered_pubmed_pairs:
                         for mapping in gathered_pubmed_pairs:
                             # Cache management
-                            self.pubC.setCachedMapping(mapping)
+                            self.pubC.setCachedMapping(
+                                mapping, delete_stale_cache=delete_stale_cache
+                            )
 
                         # Result management
                         result_array.extend(gathered_pubmed_pairs)
@@ -364,7 +368,9 @@ class SkeletonPubEnricher(ABC):
 
         return result_array
 
-    def reconcilePubIdsBatch(self, entries: "Sequence[ParsedOpebEntry]") -> None:
+    def reconcilePubIdsBatch(
+        self, entries: "Sequence[ParsedOpebEntry]", delete_stale_cache: "bool" = True
+    ) -> None:
         # First, gather all the ids on one list, prepared for the query
         # MED: prefix has been removed because there are some problems
         # on the server side
@@ -457,7 +463,9 @@ class SkeletonPubEnricher(ABC):
                 for mapping in gathered_pubmed_pairs:
                     _id = mapping["id"]
                     source_id = mapping["source"]
-                    self.pubC.setCachedMapping(mapping)
+                    self.pubC.setCachedMapping(
+                        mapping, delete_stale_cache=delete_stale_cache
+                    )
 
                     pubmed_id = mapping.get("pmid")
                     if pubmed_id is not None:
@@ -1033,6 +1041,7 @@ class SkeletonPubEnricher(ABC):
         self,
         partial_mappings: "Sequence[MutablePartialMapping]",
         onlyYear: "bool" = False,
+        delete_stale_cache: "bool" = True,
     ) -> "Sequence[IdMapping]":
         populable_mappings = []
 
@@ -1074,7 +1083,9 @@ class SkeletonPubEnricher(ABC):
                 ):
                     # It is a kind of indicator the 'year' flag
                     if p_m_c.get("year") is not None:
-                        self.pubC.setCachedMapping(p_m_c)
+                        self.pubC.setCachedMapping(
+                            p_m_c, delete_stale_cache=delete_stale_cache
+                        )
                         self.populateMapping(p_m_c, p_m, onlyYear)
 
         return cast("Sequence[IdMapping]", partial_mappings)

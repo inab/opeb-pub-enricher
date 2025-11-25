@@ -250,7 +250,7 @@ class PubDBCache(object):
             cur = self.conn.cursor()
             if initializeCache:
                 # Publication table
-                cur.execute("""
+                cur.execute("""\
 CREATE TABLE pub (
 	enricher VARCHAR(32) NOT NULL,
 	id VARCHAR(4096) NOT NULL,
@@ -261,13 +261,13 @@ CREATE TABLE pub (
 )
 """)
                 # Index on the last_fetched
-                cur.execute("""
+                cur.execute("""\
 CREATE INDEX pub_l_f ON pub(last_fetched)
 """)
                 # IDMap
                 # pub_id_type VARCHAR(32) NOT NULL,
                 # PRIMARY KEY (pub_id,pub_id_type),
-                cur.execute("""
+                cur.execute("""\
 CREATE TABLE idmap (
 	pub_id VARCHAR(4096) NOT NULL,
 	enricher VARCHAR(32) NOT NULL,
@@ -279,13 +279,13 @@ CREATE TABLE idmap (
 )
 """)
                 # Index on the last_fetched
-                cur.execute("""
+                cur.execute("""\
 CREATE INDEX idmap_l_f ON idmap(last_fetched)
 """)
                 # Denormalized citations and references
                 # so we can register empty answers,
                 # and get the whole list with a single query
-                cur.execute("""
+                cur.execute("""\
 CREATE TABLE citref (
 	enricher VARCHAR(32) NOT NULL,
 	id VARCHAR(4096) NOT NULL,
@@ -297,15 +297,15 @@ CREATE TABLE citref (
 )
 """)
                 # Index on the enricher, id and source
-                cur.execute("""
+                cur.execute("""\
 CREATE INDEX citref_e_i_s ON citref(enricher,id,source)
 """)
                 # Index on the last_fetched
-                cur.execute("""
+                cur.execute("""\
 CREATE INDEX citref_l_f ON citref(last_fetched)
 """)
                 # Lower Mappings
-                cur.execute("""
+                cur.execute("""\
 CREATE TABLE lower_map (
 	enricher VARCHAR(32) NOT NULL,
 	id VARCHAR(4096) NOT NULL,
@@ -319,11 +319,11 @@ CREATE TABLE lower_map (
 )
 """)
                 # Index on the lower mapping
-                cur.execute("""
+                cur.execute("""\
 CREATE INDEX lower_map_e_i_s ON lower_map(lower_enricher,lower_id,lower_source)
 """)
                 # Index on the last_fetched
-                cur.execute("""
+                cur.execute("""\
 CREATE INDEX lower_map_l_f ON lower_map(last_fetched)
 """)
             cur.close()
@@ -343,14 +343,17 @@ CREATE INDEX lower_map_l_f ON lower_map(last_fetched)
         pass
 
     def getCitRefs(
-        self, qual_list: "Iterable[QualifiedId]", is_cit: "bool"
+        self,
+        qual_list: "Iterable[QualifiedId]",
+        is_cit: "bool",
+        delete_stale_cache: "bool" = True,
     ) -> "Union[Iterator[Optional[Sequence[Citation]]], Iterator[Optional[Sequence[Reference]]]]":
         with self.conn:
             cur = self.conn.cursor()
             for source_id, _id in qual_list:
                 # The DATETIME expression helps invalidating stale results
                 cur.execute(
-                    """
+                    """\
 SELECT payload
 FROM citref
 WHERE
@@ -363,7 +366,20 @@ AND
 source = :source
 AND
 is_cit = :is_cit
-""".format(CACHE_DAYS),
+""".format(CACHE_DAYS)
+                    if delete_stale_cache
+                    else """\
+SELECT payload
+FROM citref
+WHERE
+enricher = :enricher
+AND
+id = :id
+AND
+source = :source
+AND
+is_cit = :is_cit
+""",
                     {
                         "enricher": self.enricher_name,
                         "id": _id,
@@ -390,7 +406,7 @@ is_cit = :is_cit
 
             # Remove
             cur.executemany(
-                """
+                """\
 DELETE FROM citref
 WHERE enricher = :enricher
 AND id = :id
@@ -418,7 +434,7 @@ AND is_cit = :is_cit
 
             # Then, insert
             cur.executemany(
-                """
+                """\
 INSERT INTO citref(enricher,id,source,is_cit,payload,last_fetched) VALUES(:enricher,:id,:source,:is_cit,:payload,:last_fetched)
 """,
                 (
@@ -464,7 +480,7 @@ INSERT INTO citref(enricher,id,source,is_cit,payload,last_fetched) VALUES(:enric
 
             # First, remove
             cur.executemany(
-                """
+                """\
 DELETE FROM citref
 WHERE enricher = :enricher
 AND id = :id
@@ -476,16 +492,20 @@ AND is_cit = :is_cit
 
             # Then, insert
             cur.executemany(
-                """
+                """\
 INSERT INTO citref(enricher,id,source,is_cit,payload,last_fetched) VALUES(:enricher,:id,:source,:is_cit,:payload,:last_fetched)
 """,
                 params_list,
             )
 
     def getCitationsAndCount(
-        self, qualified_id: "QualifiedId"
+        self,
+        qualified_id: "QualifiedId",
+        delete_stale_cache: "bool" = True,
     ) -> "Union[Tuple[Sequence[Citation],CitationCount], Tuple[None, None]]":
-        for citations in self.getCitRefs([qualified_id], True):
+        for citations in self.getCitRefs(
+            [qualified_id], True, delete_stale_cache=delete_stale_cache
+        ):
             if citations is not None:
                 return citations, len(citations)
             else:
@@ -516,9 +536,13 @@ INSERT INTO citref(enricher,id,source,is_cit,payload,last_fetched) VALUES(:enric
         self.setCitRefs([(qualified_id, citations, True)], timestamp)
 
     def getReferencesAndCount(
-        self, qualified_id: "QualifiedId"
+        self,
+        qualified_id: "QualifiedId",
+        delete_stale_cache: "bool" = True,
     ) -> "Union[Tuple[Sequence[Reference],ReferenceCount], Tuple[None, None]]":
-        for references in self.getCitRefs([qualified_id], False):
+        for references in self.getCitRefs(
+            [qualified_id], False, delete_stale_cache=delete_stale_cache
+        ):
             if references is not None:
                 return references, len(references)
             else:
@@ -558,7 +582,7 @@ INSERT INTO citref(enricher,id,source,is_cit,payload,last_fetched) VALUES(:enric
         cur = self.conn.cursor()
         for source_id, _id in qual_list:
             cur.execute(
-                """
+                """\
 SELECT last_fetched, payload
 FROM pub
 WHERE
@@ -629,7 +653,7 @@ source = :source
             params["pub_id"] = publish_id
             retval = []
             for res in cur.execute(
-                """
+                """\
 SELECT last_fetched, source, id
 FROM idmap
 WHERE
@@ -672,31 +696,33 @@ pub_id = :pub_id
         self,
         append_source_ids_batch: "Sequence[Tuple[Sequence[PublishId], SourceId, UnqualifiedId]]",
         timestamp: "datetime.datetime" = Timestamps.UTCTimestamp(),
+        delete_stale_cache: "bool" = True,
     ) -> "None":
         cur = self.conn.cursor()
 
-        # In case of stale cache, remove all
-        cur.executemany(
-            """
+        if delete_stale_cache:
+            # In case of stale cache, remove all
+            cur.executemany(
+                """\
 DELETE FROM idmap
 WHERE enricher = :enricher
 AND id = :id
 AND source = :source
 AND DATETIME('NOW','-{} DAYS') > last_fetched
 """.format(CACHE_DAYS),
-            (
-                {
-                    "enricher": self.enricher_name,
-                    "id": _id,
-                    "source": source_id,
-                }
-                for publish_id_iter, source_id, _id in append_source_ids_batch
-            ),
-        )
+                (
+                    {
+                        "enricher": self.enricher_name,
+                        "id": _id,
+                        "source": source_id,
+                    }
+                    for publish_id_iter, source_id, _id in append_source_ids_batch
+                ),
+            )
 
         # Now, try storing specifically these
         cur.executemany(
-            """
+            """\
 INSERT INTO idmap(pub_id,enricher,id,source,last_fetched) VALUES(:pub_id,:enricher,:id,:source,:last_fetched)
 """,
             (
@@ -715,31 +741,33 @@ INSERT INTO idmap(pub_id,enricher,id,source,last_fetched) VALUES(:pub_id,:enrich
     def removeSourceIds_TL(
         self,
         remove_source_ids_batch: "Sequence[Tuple[Sequence[PublishId], SourceId, UnqualifiedId]]",
+        delete_stale_cache: "bool" = True,
     ) -> "None":
         cur = self.conn.cursor()
 
         # In case of stale cache, remove all
-        cur.executemany(
-            """
+        if delete_stale_cache:
+            cur.executemany(
+                """\
 DELETE FROM idmap
 WHERE enricher = :enricher
 AND id = :id
 AND source = :source
 AND DATETIME('NOW','-{} DAYS') > last_fetched
 """.format(CACHE_DAYS),
-            (
-                {
-                    "enricher": self.enricher_name,
-                    "id": _id,
-                    "source": source_id,
-                }
-                for publish_id_iter, source_id, _id in remove_source_ids_batch
-            ),
-        )
+                (
+                    {
+                        "enricher": self.enricher_name,
+                        "id": _id,
+                        "source": source_id,
+                    }
+                    for publish_id_iter, source_id, _id in remove_source_ids_batch
+                ),
+            )
 
         # Now, try removing specifically these
         cur.executemany(
-            """
+            """\
 DELETE FROM idmap
 WHERE enricher = :enricher
 AND id = :id
@@ -854,7 +882,7 @@ AND pub_id = :pub_id
             params["lower_id"] = lower_id
             retval = []
             for res in cur.execute(
-                """
+                """\
 SELECT last_fetched, source, id
 FROM lower_map
 WHERE
@@ -901,6 +929,7 @@ lower_id = :lower_id
         source_id: "SourceId",
         _id: "UnqualifiedId",
         timestamp: "datetime.datetime" = Timestamps.UTCTimestamp(),
+        delete_stale_cache: "bool" = True,
     ) -> "None":
         cur = self.conn.cursor()
 
@@ -912,20 +941,21 @@ lower_id = :lower_id
         }
 
         # In case of stale cache, remove all
-        cur.execute(
-            """
+        if delete_stale_cache:
+            cur.execute(
+                """\
 DELETE FROM lower_map
 WHERE enricher = :enricher
 AND id = :id
 AND source = :source
 AND DATETIME('NOW','-{} DAYS') > last_fetched
 """.format(CACHE_DAYS),
-            params,
-        )
+                params,
+            )
 
         # Now, try storing specifically these
         cur.executemany(
-            """
+            """\
 INSERT INTO lower_map(enricher,id,source,lower_enricher,lower_id,lower_source,last_fetched) VALUES(:enricher,:id,:source,:lower_enricher,:lower_id,:lower_source,:last_fetched)
 """,
             (
@@ -944,26 +974,28 @@ INSERT INTO lower_map(enricher,id,source,lower_enricher,lower_id,lower_source,la
         lower_iter: "Iterable[MetaQualifiedId]",
         source_id: "SourceId",
         _id: "UnqualifiedId",
+        delete_stale_cache: "bool" = True,
     ) -> None:
         cur = self.conn.cursor()
 
         params = {"enricher": self.enricher_name, "id": _id, "source": source_id}
 
         # In case of stale cache, remove all
-        cur.execute(
-            """
+        if delete_stale_cache:
+            cur.execute(
+                """\
 DELETE FROM lower_map
 WHERE enricher = :enricher
 AND id = :id
 AND source = :source
 AND DATETIME('NOW','-{} DAYS') > last_fetched
 """.format(CACHE_DAYS),
-            params,
-        )
+                params,
+            )
 
         # Now, try removing specifically these
         cur.executemany(
-            """
+            """\
 DELETE FROM lower_map
 WHERE enricher = :enricher
 AND id = :id
@@ -987,6 +1019,7 @@ AND lower_source = :lower_source
         self,
         mappings: "Sequence[IdMapping]",
         mapping_timestamp: "datetime.datetime" = Timestamps.UTCTimestamp(),
+        delete_stale_cache: "bool" = True,
     ) -> "None":
         """
         WARNING: a UNIQUE constraint is fired if more than one mapping
@@ -1016,7 +1049,7 @@ AND lower_source = :lower_source
             # First, remove all the data from the previous mappings
             cur = self.conn.cursor()
             cur.executemany(
-                """
+                """\
 DELETE FROM pub
 WHERE enricher = :enricher
 AND id = :id
@@ -1033,7 +1066,7 @@ AND source = :source
             )
             # Then, insert them
             cur.executemany(
-                """
+                """\
 INSERT INTO pub(enricher,id,source,payload,last_fetched) VALUES(:enricher,:id,:source,:payload,:last_fetched)
 """,
                 (
@@ -1099,11 +1132,15 @@ INSERT INTO pub(enricher,id,source,payload,last_fetched) VALUES(:enricher,:id,:s
                     append_source_ids_batch.append((appendable_ids, source_id, _id))
 
             if len(remove_source_ids_batch) > 0:
-                self.removeSourceIds_TL(remove_source_ids_batch)
+                self.removeSourceIds_TL(
+                    remove_source_ids_batch, delete_stale_cache=delete_stale_cache
+                )
 
             if len(append_source_ids_batch) > 0:
                 self.appendSourceIds_TL(
-                    append_source_ids_batch, timestamp=mapping_timestamp
+                    append_source_ids_batch,
+                    timestamp=mapping_timestamp,
+                    delete_stale_cache=delete_stale_cache,
                 )
 
             # Let's manage also the lower mappings, from base_pubs
@@ -1137,25 +1174,39 @@ INSERT INTO pub(enricher,id,source,payload,last_fetched) VALUES(:enricher,:id,:s
                 # This set has the entries to be removed
                 toRemoveSet = oldLowerSet - newLowerSet
                 if len(toRemoveSet) > 0:
-                    self.removeMetaSourceIds_TL(toRemoveSet, source_id, _id)
-
+                    self.removeMetaSourceIds_TL(
+                        toRemoveSet,
+                        source_id,
+                        _id,
+                        delete_stale_cache=delete_stale_cache,
+                    )
                 # This set has the entries to be added
                 toAddSet = newLowerSet - oldLowerSet
                 if len(toAddSet) > 0:
                     self.appendMetaSourceIds_TL(
-                        toAddSet, source_id, _id, mapping_timestamp
+                        toAddSet,
+                        source_id,
+                        _id,
+                        timestamp=mapping_timestamp,
+                        delete_stale_cache=delete_stale_cache,
                     )
 
     def setCachedMapping(
         self,
         mapping: "IdMapping",
         mapping_timestamp: "datetime.datetime" = Timestamps.UTCTimestamp(),
+        delete_stale_cache: "bool" = True,
     ) -> None:
-        self.setCachedMappings([mapping], mapping_timestamp)
+        self.setCachedMappings(
+            [mapping],
+            mapping_timestamp=mapping_timestamp,
+            delete_stale_cache=delete_stale_cache,
+        )
 
     def removeCachedMappings(
         self,
         mappings: "Sequence[IdMapping]",
+        delete_stale_cache: "bool" = True,
     ) -> "None":
         with self.conn:
             # Before anything, get the previous mappings before updating them
@@ -1168,7 +1219,7 @@ INSERT INTO pub(enricher,id,source,payload,last_fetched) VALUES(:enricher,:id,:s
             # First, remove all the data from the previous mappings
             cur = self.conn.cursor()
             cur.executemany(
-                """
+                """\
 DELETE FROM pub
 WHERE enricher = :enricher
 AND id = :id
@@ -1218,7 +1269,9 @@ AND source = :source
                     remove_source_ids_batch.append((removable_ids, source_id, _id))
 
             if len(remove_source_ids_batch) > 0:
-                self.removeSourceIds_TL(remove_source_ids_batch)
+                self.removeSourceIds_TL(
+                    remove_source_ids_batch, delete_stale_cache=delete_stale_cache
+                )
 
             # Let's manage also the lower mappings, from base_pubs
             for old_mapping in old_mappings:
@@ -1238,4 +1291,9 @@ AND source = :source
 
                 # This set has the entries to be removed
                 if len(oldLowerSet) > 0:
-                    self.removeMetaSourceIds_TL(oldLowerSet, source_id, _id)
+                    self.removeMetaSourceIds_TL(
+                        oldLowerSet,
+                        source_id,
+                        _id,
+                        delete_stale_cache=delete_stale_cache,
+                    )
