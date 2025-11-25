@@ -123,7 +123,7 @@ class OfflinePubmedEnricher(AbstractPubEnricher):
 
     # Do not change these constants!!!
     OFFLINE_PUBMED_SOURCE: "Final[EnricherId]" = cast("EnricherId", "offline_pubmed")
-    PUBMED_SOURCE: "Final[EnricherId]" = cast("EnricherId", "pubmed")
+    PUBMED_SOURCE: "Final[SourceId]" = cast("SourceId", "pubmed")
 
     @classmethod
     def Name(cls) -> "EnricherId":
@@ -212,6 +212,7 @@ quit
         citations_cache = diskcache.Cache(
             citations_cache_dir.as_posix(), eviction_policy="none"
         )
+
         # In case something was still there
         citations_cache.clear()
 
@@ -220,29 +221,34 @@ quit
             self._digest_pubmed_file(entry, citations_cache)
 
         # And postprocess
-        the_source_id = cast("SourceId", self.PUBMED_SOURCE)
-        # This artificial separation is needed to avoid having the whole
-        # list of cited manuscripts in memory
-        self.pubC.clearCitRefs(
-            (
-                (
-                    (the_source_id, cast("UnqualifiedId", pmid)),
-                    True,
-                )
-                for pmid in citations_cache
-            )
-        )
-        # This artificial separation is needed to avoid having the whole
-        # list of cited manuscripts in memory
-        self.pubC.setCitRefs_ll(
-            (
-                (
-                    (the_source_id, cast("UnqualifiedId", pmid)),
-                    citations_cache[pmid],
-                    True,
-                )
-                for pmid in citations_cache
-            ),
+        # the_source_id = self.PUBMED_SOURCE
+        ## This artificial separation is needed to avoid having the whole
+        ## list of cited manuscripts in memory
+        # self.pubC.clearCitRefs(
+        #    (
+        #        (
+        #            (the_source_id, cast("UnqualifiedId", pmid)),
+        #            True,
+        #        )
+        #        for pmid in citations_cache
+        #    )
+        # )
+        ## This artificial separation is needed to avoid having the whole
+        ## list of cited manuscripts in memory
+        # self.pubC.setCitRefs_ll(
+        #    (
+        #        (
+        #            (the_source_id, cast("UnqualifiedId", pmid)),
+        #            citations_cache[pmid],
+        #            True,
+        #        )
+        #        for pmid in citations_cache
+        #    ),
+        #    timestamp=pub_common.Timestamps.BiggestTimestamp(),
+        # )
+        self.pubC.populate_citations_from_refs(
+            self.Name(),
+            self.PUBMED_SOURCE,
             timestamp=pub_common.Timestamps.BiggestTimestamp(),
         )
 
@@ -260,7 +266,7 @@ quit
             delete_stale_cache=False,
         )
 
-        the_source_id = cast("SourceId", self.PUBMED_SOURCE)
+        the_source_id = self.PUBMED_SOURCE
         # This artificial separation is needed to avoid having the whole
         # list of cited manuscripts in memory
         self.pubC.clearCitRefs(
@@ -293,15 +299,15 @@ quit
                 for ref_e in references:
                     pre_citations.setdefault(ref_e["id"], []).append(pmid)
 
-        with citations_cache.transact():
-            for pmid, partial_citations in pre_citations.items():
-                citations = citations_cache.get(pmid)
-                if citations is None:
-                    citations = partial_citations
-                else:
-                    citations.extend(partial_citations)
-
-                citations_cache[pmid] = citations
+        # with citations_cache.transact():
+        #     for pmid, partial_citations in pre_citations.items():
+        #         citations = citations_cache.get(pmid)
+        #         if citations is None:
+        #             citations = partial_citations
+        #         else:
+        #             citations.extend(partial_citations)
+        #
+        #         citations_cache[pmid] = citations
 
     def _digest_pubmed_file(
         self, path: "pathlib.Path", citations_cache: "diskcache.Cache"
@@ -345,7 +351,7 @@ quit
 
                     # Starting point: known pubmed id
                     mapping: "IdMapping" = {
-                        "source": cast("SourceId", self.PUBMED_SOURCE),
+                        "source": self.PUBMED_SOURCE,
                         "id": pmid,
                         "pmid": pmid,
                         "year": year,
@@ -372,9 +378,14 @@ quit
                         "./ReferenceList/Reference/ArticleIdList/ArticleId"
                     ):
                         if ref_e.get("IdType") == self.PUBMED_SOURCE:
-                            references.append(
-                                {"id": ref_e.text, "source": self.PUBMED_SOURCE}
-                            )
+                            if ref_e.text is not None:
+                                references.append(
+                                    {"id": ref_e.text, "source": self.PUBMED_SOURCE}
+                                )
+                            else:
+                                self.logger.warning(
+                                    f"FIXME: Have a look at PMID {pmid} references"
+                                )
 
                     mappings_batch[pmid] = (
                         mapping,
@@ -382,7 +393,7 @@ quit
                     )
 
                 elif elem.tag == "DeleteCitation":
-                    the_source_id = cast("SourceId", self.PUBMED_SOURCE)
+                    the_source_id = self.PUBMED_SOURCE
                     self.pubC.removeCachedMappings(
                         [
                             {
@@ -440,7 +451,7 @@ quit
 
                     # Starting point: known pubmed id
                     mapping = {
-                        "source": cast("SourceId", self.PUBMED_SOURCE),
+                        "source": self.PUBMED_SOURCE,
                         "id": pmid,
                         "pmid": pmid,
                         "year": year,
@@ -467,9 +478,14 @@ quit
                         "./ReferenceList/Reference/ArticleIdList/ArticleId"
                     ):
                         if ref_e.get("IdType") == self.PUBMED_SOURCE:
-                            references.append(
-                                {"id": ref_e.text, "source": self.PUBMED_SOURCE}
-                            )
+                            if ref_e.text is not None:
+                                references.append(
+                                    {"id": ref_e.text, "source": self.PUBMED_SOURCE}
+                                )
+                            else:
+                                self.logger.warning(
+                                    f"FIXME: Have a look at PMID {pmid} references"
+                                )
 
                     mappings_batch[pmid] = (
                         mapping,

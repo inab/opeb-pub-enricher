@@ -11,6 +11,7 @@ import zlib
 
 from typing import (
     cast,
+    overload,
     TYPE_CHECKING,
 )
 
@@ -341,6 +342,70 @@ CREATE INDEX lower_map_l_f ON lower_map(last_fetched)
     def sync(self) -> "None":
         # This method has become a no-op
         pass
+
+    @overload
+    def getAllCitRefs(
+        self,
+        source_id: "SourceId",
+        is_cit: "Literal[True]",
+        delete_stale_cache: "bool" = True,
+    ) -> "Iterator[Optional[Tuple[UnqualifiedId, Sequence[Citation]]]]": ...
+
+    @overload
+    def getAllCitRefs(
+        self,
+        source_id: "SourceId",
+        is_cit: "Literal[False]",
+        delete_stale_cache: "bool" = True,
+    ) -> "Iterator[Optional[Tuple[UnqualifiedId, Sequence[Reference]]]]": ...
+
+    def getAllCitRefs(
+        self,
+        source_id: "SourceId",
+        is_cit: "bool",
+        delete_stale_cache: "bool" = True,
+    ) -> "Union[Iterator[Optional[Tuple[UnqualifiedId, Sequence[Citation]]]], Iterator[Optional[Tuple[UnqualifiedId, Sequence[Reference]]]]]":
+        with self.conn:
+            cur = self.conn.cursor()
+            # The DATETIME expression helps invalidating stale results
+            for res in cur.execute(
+                """\
+SELECT id, payload
+FROM citref
+WHERE
+DATETIME('NOW','-{} DAYS') <= last_fetched
+AND
+enricher = :enricher
+AND
+source = :source
+AND
+is_cit = :is_cit
+""".format(CACHE_DAYS)
+                if delete_stale_cache
+                else """\
+SELECT id, payload
+FROM citref
+WHERE
+enricher = :enricher
+AND
+source = :source
+AND
+is_cit = :is_cit
+""",
+                {
+                    "enricher": self.enricher_name,
+                    "source": source_id,
+                    "is_cit": is_cit,
+                },
+            ):
+                yield (
+                    res[0],
+                    self.jd.decode(zlib.decompress(res[1]).decode("utf-8"))
+                    if res[1] is not None
+                    else [],
+                )
+            else:
+                yield None
 
     def getCitRefs(
         self,
@@ -1297,3 +1362,89 @@ AND source = :source
                         _id,
                         delete_stale_cache=delete_stale_cache,
                     )
+
+    def populate_citations_from_refs(
+        self,
+        enricher_id: "EnricherId",
+        source_id: "SourceId",
+        timestamp: "datetime.datetime" = Timestamps.UTCTimestamp(),
+    ) -> "None":
+        with self.conn:
+            cur = self.conn.cursor()
+
+            # Remove all citations
+            cur.execute(
+                """\
+DELETE FROM citref
+WHERE enricher = :enricher
+AND source = :source
+AND is_cit
+""",
+                {
+                    "enricher": enricher_id,
+                    "source": source_id,
+                },
+            )
+
+            # TEMP citations table
+            cur.execute("""\
+CREATE TEMPORARY TABLE tempcits (
+	pmid VARCHAR(4096) NOT NULL,
+    cit_pmid VARCHAR(4096) NOT NULL,
+)
+""")
+
+            for res in cur.execute(
+                """\
+SELECT id, payload
+FROM citref
+WHERE
+enricher = :enricher
+AND
+source = :source
+AND
+NOT is_cit
+                """,
+                {"enricher": enricher_id, "source": source_id},
+            ):
+                cur.executemany(
+                    """\
+INSERT INTO tempcits VALUES(?,?)
+                    """,
+                    (
+                        (
+                            ref,
+                            res[0],
+                        )
+                        for ref in self.jd.decode(
+                            zlib.decompress(res[1]).decode("utf-8")
+                        )
+                    ),
+                )
+
+            cur.execute("""CREATE INDEX tempcits_pmid TEMPCITS(pmid)""")
+
+            cur.executemany(
+                """\
+INSERT INTO citref(enricher,id,source,is_cit,payload,last_fetched) VALUES(:enricher,:id,:source, TRUE,:payload,:last_fetched)
+""",
+                (
+                    {
+                        "enricher": enricher_id,
+                        "source": source_id,
+                        "id": lastres[0],
+                        "payload": zlib.compress(
+                            ("[" + lastres[1] + "]").encode("utf-8"),
+                            zlib.Z_BEST_COMPRESSION,
+                        ),
+                        "last_fetched": timestamp,
+                    }
+                    for lastres in cur.execute(
+                        """\
+SELECT pmid, '"' || GROUP_CONCAT(cit_pmid, '", "') || '"'
+FROM tempcits_pmid
+GROUP BY pmid
+                    """
+                    )
+                ),
+            )
