@@ -1390,7 +1390,7 @@ AND is_cit
             cur.execute("""\
 CREATE TEMPORARY TABLE tempcits (
 	pmid VARCHAR(4096) NOT NULL,
-    cit_pmid VARCHAR(4096) NOT NULL,
+    cit_pmid VARCHAR(4096) NOT NULL
 )
 """)
 
