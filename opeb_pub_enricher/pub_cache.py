@@ -1417,7 +1417,7 @@ INSERT INTO tempcits VALUES(?,?)
                     """,
                     (
                         (
-                            ref,
+                            ref["id"],
                             res[0],
                         )
                         for ref in self.jd.decode(
