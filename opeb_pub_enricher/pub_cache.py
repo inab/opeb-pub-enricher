@@ -1386,13 +1386,17 @@ AND is_cit
                 },
             )
 
+            curtemp = self.conn.cursor()
             # TEMP citations table
-            cur.execute("""\
+            curtemp.execute("""\
 CREATE TEMPORARY TABLE tempcits (
 	pmid VARCHAR(4096) NOT NULL,
     cit_pmid VARCHAR(4096) NOT NULL
 )
 """)
+            curtemp.close()
+            self.conn.commit()
+            curtemp = self.conn.cursor()
 
             for res in cur.execute(
                 """\
@@ -1407,7 +1411,7 @@ NOT is_cit
                 """,
                 {"enricher": enricher_id, "source": source_id},
             ):
-                cur.executemany(
+                curtemp.executemany(
                     """\
 INSERT INTO tempcits VALUES(?,?)
                     """,
@@ -1422,7 +1426,7 @@ INSERT INTO tempcits VALUES(?,?)
                     ),
                 )
 
-            cur.execute("""CREATE INDEX tempcits_pmid ON TEMPCITS(pmid)""")
+            curtemp.execute("""CREATE INDEX tempcits_pmid ON TEMPCITS(pmid)""")
 
             cur.executemany(
                 """\
@@ -1439,10 +1443,10 @@ INSERT INTO citref(enricher,id,source,is_cit,payload,last_fetched) VALUES(:enric
                         ),
                         "last_fetched": timestamp,
                     }
-                    for lastres in cur.execute(
+                    for lastres in curtemp.execute(
                         """\
 SELECT pmid, '"' || GROUP_CONCAT(cit_pmid, '", "') || '"'
-FROM tempcits_pmid
+FROM tempcits
 GROUP BY pmid
                     """
                     )
