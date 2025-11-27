@@ -1445,7 +1445,7 @@ INSERT INTO citref(enricher,id,source,is_cit,payload,last_fetched) VALUES(:enric
                     }
                     for lastres in curtemp.execute(
                         """\
-SELECT pmid, '"' || GROUP_CONCAT(cit_pmid, '", "') || '"'
+SELECT pmid, '{"id": "' || GROUP_CONCAT(cit_pmid, '", "source": "pubmed"},{"id": "') || '", "source": "pubmed"}'
 FROM tempcits
 GROUP BY pmid
                     """
