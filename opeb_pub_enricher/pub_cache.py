@@ -1422,7 +1422,7 @@ INSERT INTO tempcits VALUES(?,?)
                     ),
                 )
 
-            cur.execute("""CREATE INDEX tempcits_pmid TEMPCITS(pmid)""")
+            cur.execute("""CREATE INDEX tempcits_pmid ON TEMPCITS(pmid)""")
 
             cur.executemany(
                 """\
