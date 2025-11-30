@@ -664,6 +664,7 @@ class SkeletonPubEnricher(ABC):
         pub_list: "Union[Sequence[OpebEntryPub], Sequence[IdMapping], Sequence[Union[BrokenWinner, QualifiedWinner]]]",
         verbosityLevel: "float" = 0,
         mode: "int" = 3,
+        delete_stale_cache: "bool" = True,
     ) -> "Union[Sequence[GatheredCitRefs], Sequence[GatheredCitRefStats]]":
         """
         This method takes in batches of found publications and it retrieves citations from ids
@@ -720,9 +721,21 @@ class SkeletonPubEnricher(ABC):
         if verbosityLevel > -1 and verbosityLevel <= 0:
             for pub_field_s in cast("Sequence[TransientCitRefStats]", pub_list):
                 if (mode & 2) != 0:
-                    maybe_citations: "Optional[Sequence[Citation]]" = pub_field_s.pop(
-                        "citations", None
-                    )
+                    maybe_citations_raw = pub_field_s.pop("citations", None)
+                    maybe_citations: "Optional[Sequence[Citation]]" = None
+                    if maybe_citations_raw is not None:
+                        # Detect whether the citations have the year field
+                        if len(maybe_citations_raw) > 0 and (
+                            "year" not in maybe_citations_raw[0]
+                        ):
+                            maybe_citations = self.populatePubIds(
+                                maybe_citations_raw,
+                                onlyYear=True,
+                                delete_stale_cache=delete_stale_cache,
+                            )
+                        else:
+                            maybe_citations = maybe_citations_raw
+
                     # Computing the stats
                     pub_field_s["citation_stats"] = (
                         None
@@ -731,9 +744,21 @@ class SkeletonPubEnricher(ABC):
                     )
 
                 if (mode & 1) != 0:
-                    maybe_references: "Optional[Sequence[Reference]]" = pub_field_s.pop(
-                        "references", None
-                    )
+                    maybe_references_raw = pub_field_s.pop("references", None)
+                    maybe_references: "Optional[Sequence[Reference]]" = None
+                    if maybe_references_raw is not None:
+                        # Detect whether the references have the year field
+                        if len(maybe_references_raw) > 0 and (
+                            "year" not in maybe_references_raw[0]
+                        ):
+                            maybe_references = self.populatePubIds(
+                                maybe_references_raw,
+                                onlyYear=True,
+                                delete_stale_cache=delete_stale_cache,
+                            )
+                        else:
+                            maybe_references = maybe_references_raw
+
                     # Computing the stats
                     pub_field_s["reference_stats"] = (
                         None
@@ -771,7 +796,10 @@ class SkeletonPubEnricher(ABC):
 
             if nextLevelPop:
                 self.listReconcileCitRefMetricsBatch(
-                    cast("Sequence[IdMapping]", nextLevelPop), verbosityLevel - 1, mode
+                    cast("Sequence[IdMapping]", nextLevelPop),
+                    verbosityLevel=verbosityLevel - 1,
+                    mode=mode,
+                    delete_stale_cache=delete_stale_cache,
                 )
 
         # This is needed for multiprocess approaches
