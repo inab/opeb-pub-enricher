@@ -243,6 +243,15 @@ class SkeletonPubEnricher(ABC):
     def Name(cls) -> "EnricherId":
         return cast("EnricherId", "skel")
 
+    @classmethod
+    @abstractmethod
+    def DefaultSource(cls) -> "SourceId":
+        return cast("SourceId", "skel")
+
+    @classmethod
+    def DefaultDeleteStaleCache(cls) -> "bool":
+        return True
+
     @abstractmethod
     def queryPubIdsBatch(self, query_ids: "Sequence[QueryId]") -> "Sequence[IdMapping]":
         pass

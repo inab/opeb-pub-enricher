@@ -19,6 +19,7 @@ if TYPE_CHECKING:
 
     from .pub_common import (
         EnricherId,
+        SourceId,
     )
 
     from .doi_cache import DOIChecker
@@ -87,6 +88,10 @@ class AbstractPubEnricher(SkeletonPubEnricher):
     @abstractmethod
     def Name(cls) -> "EnricherId":
         return cast("EnricherId", "abstract")
+
+    @classmethod
+    def DefaultSource(cls) -> "SourceId":
+        return cast("SourceId", cls.Name())
 
 
 if TYPE_CHECKING:

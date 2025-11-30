@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 
-import configparser
 import gzip
 import pathlib
 import urllib.parse
@@ -8,21 +7,17 @@ import urllib.request
 
 from typing import (
     cast,
-    overload,
     TYPE_CHECKING,
 )
 
 import binary_lftp
 
-import diskcache
 import lxml.etree
 
 if TYPE_CHECKING:
     from typing import (
         Final,
-        Iterable,
         Iterator,
-        Mapping,
         MutableMapping,
         MutableSequence,
         Optional,
@@ -31,16 +26,9 @@ if TYPE_CHECKING:
         Union,
     )
 
-    from .doi_cache import DOIChecker
-
     from .pub_cache import (
-        GatheredCitations,
-        GatheredCitRefs,
-        GatheredReferences,
         IdMapping,
         IdMappingMinimal,
-        PubDBCache,
-        QueryId,
         Reference,
     )
 
@@ -55,7 +43,7 @@ if TYPE_CHECKING:
     )
 
 
-from .abstract_pub_enricher import AbstractPubEnricher
+from .offline_abstract_pub_enricher import OfflineAbstractPubEnricher
 
 from .skeleton_pub_enricher import (
     PubEnricherException,
@@ -64,62 +52,13 @@ from .skeleton_pub_enricher import (
 from . import pub_common
 
 
-class OfflinePubmedEnricher(AbstractPubEnricher):
-    PUBMED_BASELINE_URL = "ftp://ftp.ncbi.nlm.nih.gov/pubmed/baseline/"
-    PUBMED_UPDATEFILES_URL = "ftp://ftp.ncbi.nlm.nih.gov/pubmed/updatefiles/"
+class OfflinePubmedEnricher(OfflineAbstractPubEnricher):
+    PUBMED_BASELINE_URL: "Final[str]" = "ftp://ftp.ncbi.nlm.nih.gov/pubmed/baseline/"
+    PUBMED_UPDATEFILES_URL: "Final[str]" = (
+        "ftp://ftp.ncbi.nlm.nih.gov/pubmed/updatefiles/"
+    )
 
     BATCH_THRESHOLD = 10240
-
-    @overload
-    def __init__(
-        self,
-        cache: "str",
-        prefix: "Optional[str]" = None,
-        config: "Optional[configparser.ConfigParser]" = None,
-        doi_checker: "Optional[DOIChecker]" = None,
-        is_db_synchronous: "bool" = True,
-    ): ...
-
-    @overload
-    def __init__(
-        self,
-        cache: "PubDBCache",
-        prefix: "Optional[str]" = None,
-        config: "Optional[configparser.ConfigParser]" = None,
-        doi_checker: "Optional[DOIChecker]" = None,
-        is_db_synchronous: "bool" = True,
-    ): ...
-
-    def __init__(
-        self,
-        cache: "Union[str, PubDBCache]",
-        prefix: "Optional[str]" = None,
-        config: "Optional[configparser.ConfigParser]" = None,
-        doi_checker: "Optional[DOIChecker]" = None,
-        is_db_synchronous: "bool" = True,
-    ):
-        super().__init__(
-            cache,
-            prefix=prefix,
-            config=config,
-            doi_checker=doi_checker,
-            is_db_synchronous=is_db_synchronous,
-        )
-
-        # The section name is the symbolic name given to this class
-        # section_name = self.Name()
-
-        self.ftp_cache_dir = pathlib.Path(self.cache_dir) / (self.Name() + "_FTP")
-        self.ftp_cache_tracker = diskcache.Cache(
-            self.ftp_cache_dir.as_posix(), eviction_policy="none"
-        )
-
-        dir_entries = self._mirror_pubmed()
-
-        if len(dir_entries) > 0:
-            with self.pubC:
-                self._digest_pubmed_dir_entries(dir_entries)
-                # pass
 
     # Do not change these constants!!!
     OFFLINE_PUBMED_SOURCE: "Final[EnricherId]" = cast("EnricherId", "offline_pubmed")
@@ -129,49 +68,18 @@ class OfflinePubmedEnricher(AbstractPubEnricher):
     def Name(cls) -> "EnricherId":
         return cls.OFFLINE_PUBMED_SOURCE
 
-    def queryPubIdsBatch(self, query_ids: "Sequence[QueryId]") -> "Sequence[IdMapping]":
-        self.logger.warning(
-            f"This method was called to query about {len(query_ids)} potential identifiers"
-        )
-        return []
+    @classmethod
+    def DefaultSource(cls) -> "SourceId":
+        return cls.PUBMED_SOURCE
 
-    def queryCitRefsBatch(
-        self,
-        query_citations_data: "Iterable[IdMappingMinimal]",
-        minimal: "bool" = False,
-        mode: "int" = 3,
-    ) -> "Iterator[Union[GatheredCitations, GatheredReferences, GatheredCitRefs]]":
-        # As
-        self.logger.warning(
-            f"This method was called to get citrefs for {len(list(query_citations_data))} entries"
-        )
-        return iter([])
-
-    def populatePubIdsBatch(
-        self, partial_mappings: "MutableSequence[IdMapping]"
-    ) -> None:
-        # title => title
-        # fulljournalname => journal
-        # sortpubdate => derived year
-        # authors => authors
-        # => pmid
-        # => doi
-        # => pmcid
-        # => id (internal)
-
-        # No work should be performed here
-        self.logger.warning(
-            f"This method was called to populate {len(partial_mappings)} partial mappings"
-        )
-
-    def _mirror_pubmed(self) -> "Sequence[pathlib.Path]":
+    def mirror_upstream(self) -> "Sequence[pathlib.Path]":
         # TODO: mirror Pubmed dumps on instantiation
         parsed_baseline_url = urllib.parse.urlparse(self.PUBMED_BASELINE_URL)
         parsed_updatefiles_url = urllib.parse.urlparse(self.PUBMED_UPDATEFILES_URL)
 
-        baseline_cache_dir = self.ftp_cache_dir / "BASELINE"
+        baseline_cache_dir = self.upstream_cache_dir / "BASELINE"
         baseline_cache_dir.mkdir(parents=True, exist_ok=True)
-        updatefiles_cache_dir = self.ftp_cache_dir / "UPDATEFILES"
+        updatefiles_cache_dir = self.upstream_cache_dir / "UPDATEFILES"
         updatefiles_cache_dir.mkdir(parents=True, exist_ok=True)
 
         command_script = f"""\
@@ -192,7 +100,7 @@ quit
         # TODO: incrementally process Pubmed dumps if raw mirror is newer than processed one
         # Last pass: find the target files
         dir_entries = []
-        for entry in pub_common.scantree(self.ftp_cache_dir):
+        for entry in pub_common.scantree(self.upstream_cache_dir):
             if entry.is_file(follow_symlinks=False):
                 if entry.name.startswith("pubmed") and entry.name.endswith(".xml.gz"):
                     # Save for later processing
@@ -203,67 +111,10 @@ quit
 
         return dir_entries
 
-    def _digest_pubmed_dir_entries(
-        self, dir_entries: "Sequence[pathlib.Path]"
-    ) -> "None":
-        # Now, let's process this
-        for entry in dir_entries:
-            self._digest_pubmed_file(entry)
-
-        self.pubC.populate_citations_from_refs(
-            self.Name(),
-            self.PUBMED_SOURCE,
-            timestamp=pub_common.Timestamps.BiggestTimestamp(),
-        )
-
-    def __commit_batch(
-        self,
-        mappings_batch: "Mapping[UnqualifiedId, Tuple[IdMapping, Sequence[Reference]]]",
-    ) -> "None":
-        """Note: the batch must have unique values"""
-        self.pubC.setCachedMappings(
-            [mapping for mapping, references in mappings_batch.values()],
-            mapping_timestamp=pub_common.Timestamps.BiggestTimestamp(),
-            delete_stale_cache=False,
-        )
-
-        the_source_id = self.PUBMED_SOURCE
-        # This artificial separation is needed to avoid having the whole
-        # list of cited manuscripts in memory
-        self.pubC.clearCitRefs(
-            (
-                (
-                    (the_source_id, pmid),
-                    False,
-                )
-                for pmid in mappings_batch.keys()
-            )
-        )
-        # This artificial separation is needed to avoid having the whole
-        # list of cited manuscripts in memory
-        self.pubC.setCitRefs_ll(
-            (
-                (
-                    (the_source_id, mapping["id"]),
-                    references,
-                    False,
-                )
-                for mapping, references in mappings_batch.values()
-            ),
-            timestamp=pub_common.Timestamps.BiggestTimestamp(),
-        )
-        # And saving the reverse ones
-        pre_citations: "MutableMapping[UnqualifiedId, MutableSequence[UnqualifiedId]]" = dict()
-        for mapping, references in mappings_batch.values():
-            if len(references) > 0:
-                pmid = mapping["id"]
-                for ref_e in references:
-                    pre_citations.setdefault(ref_e["id"], []).append(pmid)
-
-    def _digest_pubmed_file(
+    def digest_upstream_file(
         self,
         path: "pathlib.Path",
-    ) -> "None":
+    ) -> "Iterator[Union[MutableMapping[UnqualifiedId, Tuple[IdMapping, Sequence[Reference]]], Sequence[IdMappingMinimal]]]":
         with gzip.open(path, mode="rb") as pH:
             mappings_batch: "MutableMapping[UnqualifiedId, Tuple[IdMapping, Sequence[Reference]]]" = dict()
             for _, elem in lxml.etree.iterparse(
@@ -345,35 +196,14 @@ quit
                     )
 
                 elif elem.tag == "DeleteCitation":
-                    the_source_id = self.PUBMED_SOURCE
-                    self.pubC.removeCachedMappings(
-                        [
-                            {
-                                "id": p_elem.text,
-                                "source": the_source_id,
-                            }
-                            for p_elem in elem
-                        ],
-                        delete_stale_cache=False,
-                    )
-                    self.pubC.clearCitRefs(
-                        (
-                            (
-                                (the_source_id, cast("UnqualifiedId", p_elem.text)),
-                                False,
-                            )
-                            for p_elem in elem
-                        )
-                    )
-                    self.pubC.clearCitRefs(
-                        (
-                            (
-                                (the_source_id, cast("UnqualifiedId", p_elem.text)),
-                                True,
-                            )
-                            for p_elem in elem
-                        )
-                    )
+                    the_source_id = self.DefaultSource()
+                    yield [
+                        {
+                            "id": p_elem.text,
+                            "source": the_source_id,
+                        }
+                        for p_elem in elem
+                    ]
                 elif elem.tag == "PubmedBookArticle":
                     bdoc = elem.find("BookDocument")
                     assert bdoc is not None
@@ -443,11 +273,11 @@ quit
                 # Propagating contents
                 if pmid is not None:
                     if len(mappings_batch) >= self.BATCH_THRESHOLD:
-                        self.__commit_batch(mappings_batch)
+                        yield mappings_batch
                         mappings_batch = dict()
 
                 elem.clear(keep_tail=True)
 
             # Remaining
             if len(mappings_batch) > 0:
-                self.__commit_batch(mappings_batch)
+                yield mappings_batch
