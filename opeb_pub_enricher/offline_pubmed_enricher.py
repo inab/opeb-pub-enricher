@@ -206,58 +206,19 @@ quit
     def _digest_pubmed_dir_entries(
         self, dir_entries: "Sequence[pathlib.Path]"
     ) -> "None":
-        citations_cache_dir = pathlib.Path(self.cache_dir) / (
-            self.Name() + "_Digest.db"
-        )
-        citations_cache = diskcache.Cache(
-            citations_cache_dir.as_posix(), eviction_policy="none"
-        )
-
-        # In case something was still there
-        citations_cache.clear()
-
         # Now, let's process this
         for entry in dir_entries:
-            self._digest_pubmed_file(entry, citations_cache)
+            self._digest_pubmed_file(entry)
 
-        # And postprocess
-        # the_source_id = self.PUBMED_SOURCE
-        ## This artificial separation is needed to avoid having the whole
-        ## list of cited manuscripts in memory
-        # self.pubC.clearCitRefs(
-        #    (
-        #        (
-        #            (the_source_id, cast("UnqualifiedId", pmid)),
-        #            True,
-        #        )
-        #        for pmid in citations_cache
-        #    )
-        # )
-        ## This artificial separation is needed to avoid having the whole
-        ## list of cited manuscripts in memory
-        # self.pubC.setCitRefs_ll(
-        #    (
-        #        (
-        #            (the_source_id, cast("UnqualifiedId", pmid)),
-        #            citations_cache[pmid],
-        #            True,
-        #        )
-        #        for pmid in citations_cache
-        #    ),
-        #    timestamp=pub_common.Timestamps.BiggestTimestamp(),
-        # )
         self.pubC.populate_citations_from_refs(
             self.Name(),
             self.PUBMED_SOURCE,
             timestamp=pub_common.Timestamps.BiggestTimestamp(),
         )
 
-        # citations_cache.clear()
-
     def __commit_batch(
         self,
         mappings_batch: "Mapping[UnqualifiedId, Tuple[IdMapping, Sequence[Reference]]]",
-        citations_cache: "diskcache.Cache",
     ) -> "None":
         """Note: the batch must have unique values"""
         self.pubC.setCachedMappings(
@@ -299,18 +260,9 @@ quit
                 for ref_e in references:
                     pre_citations.setdefault(ref_e["id"], []).append(pmid)
 
-        # with citations_cache.transact():
-        #     for pmid, partial_citations in pre_citations.items():
-        #         citations = citations_cache.get(pmid)
-        #         if citations is None:
-        #             citations = partial_citations
-        #         else:
-        #             citations.extend(partial_citations)
-        #
-        #         citations_cache[pmid] = citations
-
     def _digest_pubmed_file(
-        self, path: "pathlib.Path", citations_cache: "diskcache.Cache"
+        self,
+        path: "pathlib.Path",
     ) -> "None":
         with gzip.open(path, mode="rb") as pH:
             mappings_batch: "MutableMapping[UnqualifiedId, Tuple[IdMapping, Sequence[Reference]]]" = dict()
@@ -422,10 +374,6 @@ quit
                             for p_elem in elem
                         )
                     )
-                    for p_elem in elem:
-                        pmid = p_elem.text
-                        if pmid in citations_cache:
-                            del citations_cache[pmid]
                 elif elem.tag == "PubmedBookArticle":
                     bdoc = elem.find("BookDocument")
                     assert bdoc is not None
@@ -495,11 +443,11 @@ quit
                 # Propagating contents
                 if pmid is not None:
                     if len(mappings_batch) >= self.BATCH_THRESHOLD:
-                        self.__commit_batch(mappings_batch, citations_cache)
+                        self.__commit_batch(mappings_batch)
                         mappings_batch = dict()
 
                 elem.clear(keep_tail=True)
 
             # Remaining
             if len(mappings_batch) > 0:
-                self.__commit_batch(mappings_batch, citations_cache)
+                self.__commit_batch(mappings_batch)
