@@ -99,10 +99,11 @@ class OfflineAbstractPubEnricher(AbstractPubEnricher):
             self._upstream_cache_dir.as_posix(), eviction_policy="none"
         )
 
-        dir_entries = self.mirror_upstream(
-            self._upstream_cache_dir,
-            cast("Mapping[str, Tuple[bytes, int]]", self._upstream_cache_tracker),
-        )
+        with self._upstream_cache_tracker.transact():
+            dir_entries = self.mirror_upstream(
+                self._upstream_cache_dir,
+                cast("Mapping[str, Tuple[bytes, int]]", self._upstream_cache_tracker),
+            )
 
         if len(dir_entries) > 0:
             with self.pubC:
@@ -201,7 +202,8 @@ class OfflineAbstractPubEnricher(AbstractPubEnricher):
                     self.logger.error("FIXME: an anomaly!!!!")
 
             # When it was properly processed is when the fingerprint is preserved
-            self._upstream_cache_tracker[entry.name] = fingerprint
+            with self._upstream_cache_tracker.transact():
+                self._upstream_cache_tracker[entry.name] = fingerprint
 
         self.pubC.populate_citations_from_refs(
             self.Name(),
