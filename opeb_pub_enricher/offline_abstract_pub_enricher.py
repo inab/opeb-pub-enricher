@@ -171,6 +171,7 @@ class OfflineAbstractPubEnricher(AbstractPubEnricher):
         self, dir_entries: "Sequence[Tuple[pathlib.Path, Tuple[bytes, int]]]"
     ) -> "None":
         # Now, let's process this
+        do_recompute_citations = False
         for entry, fingerprint in dir_entries:
             for mappings_batch_or_delete_list in self.digest_upstream_file(entry):
                 if isinstance(mappings_batch_or_delete_list, dict):
@@ -205,11 +206,14 @@ class OfflineAbstractPubEnricher(AbstractPubEnricher):
             with self._upstream_cache_tracker.transact():
                 self._upstream_cache_tracker[entry.name] = fingerprint
 
-        self.pubC.populate_citations_from_refs(
-            self.Name(),
-            self.DefaultSource(),
-            timestamp=pub_common.Timestamps.BiggestTimestamp(),
-        )
+            do_recompute_citations = True
+
+        if do_recompute_citations:
+            self.pubC.populate_citations_from_refs(
+                self.Name(),
+                self.DefaultSource(),
+                timestamp=pub_common.Timestamps.BiggestTimestamp(),
+            )
 
     @abstractmethod
     def digest_upstream_file(
