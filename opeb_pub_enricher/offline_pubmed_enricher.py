@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 
 import gzip
+import hashlib
+import os
 import pathlib
 import urllib.parse
 import urllib.request
@@ -18,6 +20,7 @@ if TYPE_CHECKING:
     from typing import (
         Final,
         Iterator,
+        Mapping,
         MutableMapping,
         MutableSequence,
         Optional,
@@ -72,14 +75,18 @@ class OfflinePubmedEnricher(OfflineAbstractPubEnricher):
     def DefaultSource(cls) -> "SourceId":
         return cls.PUBMED_SOURCE
 
-    def mirror_upstream(self) -> "Sequence[pathlib.Path]":
+    def mirror_upstream(
+        self,
+        upstream_cache_dir: "pathlib.Path",
+        upstream_cache_tracker: "Mapping[str, Tuple[bytes, int]]",
+    ) -> "Sequence[Tuple[pathlib.Path, Tuple[bytes, int]]]":
         # TODO: mirror Pubmed dumps on instantiation
         parsed_baseline_url = urllib.parse.urlparse(self.PUBMED_BASELINE_URL)
         parsed_updatefiles_url = urllib.parse.urlparse(self.PUBMED_UPDATEFILES_URL)
 
-        baseline_cache_dir = self.upstream_cache_dir / "BASELINE"
+        baseline_cache_dir = upstream_cache_dir / "BASELINE"
         baseline_cache_dir.mkdir(parents=True, exist_ok=True)
-        updatefiles_cache_dir = self.upstream_cache_dir / "UPDATEFILES"
+        updatefiles_cache_dir = upstream_cache_dir / "UPDATEFILES"
         updatefiles_cache_dir.mkdir(parents=True, exist_ok=True)
 
         command_script = f"""\
@@ -100,14 +107,33 @@ quit
         # TODO: incrementally process Pubmed dumps if raw mirror is newer than processed one
         # Last pass: find the target files
         dir_entries = []
-        for entry in pub_common.scantree(self.upstream_cache_dir):
+        for entry in pub_common.scantree(upstream_cache_dir):
             if entry.is_file(follow_symlinks=False):
                 if entry.name.startswith("pubmed") and entry.name.endswith(".xml.gz"):
-                    # Save for later processing
-                    dir_entries.append(pathlib.Path(entry.path))
+                    with open(entry.path, mode="rb") as cH:
+                        h = hashlib.sha1()
+                        while True:
+                            chunk = cH.read(1024 * 1024)
+                            if chunk is None or len(chunk) == 0:
+                                break
+
+                            h.update(chunk)
+
+                        fingerprint: "Tuple[bytes, int]" = (
+                            h.digest(),
+                            os.fstat(cH.fileno()).st_size,
+                        )
+
+                    cached_fingerprint: "Optional[Tuple[bytes, int]]" = (
+                        upstream_cache_tracker.get(entry.name)
+                    )
+
+                    if cached_fingerprint is None or cached_fingerprint != fingerprint:
+                        # Save for later processing
+                        dir_entries.append((pathlib.Path(entry.path), fingerprint))
 
         # Order by name in place, not full name
-        dir_entries.sort(key=lambda ent: ent.name)
+        dir_entries.sort(key=lambda ent: ent[0].name)
 
         return dir_entries
 

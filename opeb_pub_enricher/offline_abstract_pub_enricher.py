@@ -92,14 +92,17 @@ class OfflineAbstractPubEnricher(AbstractPubEnricher):
         # The section name is the symbolic name given to this class
         # section_name = self.Name()
 
-        self.upstream_cache_dir = pathlib.Path(self.cache_dir) / (
+        self._upstream_cache_dir = pathlib.Path(self.cache_dir) / (
             self.Name() + "_UPSTREAM"
         )
-        self.upstream_cache_tracker = diskcache.Cache(
-            self.upstream_cache_dir.as_posix(), eviction_policy="none"
+        self._upstream_cache_tracker = diskcache.Cache(
+            self._upstream_cache_dir.as_posix(), eviction_policy="none"
         )
 
-        dir_entries = self.mirror_upstream()
+        dir_entries = self.mirror_upstream(
+            self._upstream_cache_dir,
+            cast("Mapping[str, Tuple[bytes, int]]", self._upstream_cache_tracker),
+        )
 
         if len(dir_entries) > 0:
             with self.pubC:
@@ -156,14 +159,18 @@ class OfflineAbstractPubEnricher(AbstractPubEnricher):
         )
 
     @abstractmethod
-    def mirror_upstream(self) -> "Sequence[pathlib.Path]":
+    def mirror_upstream(
+        self,
+        upstream_cache_dir: "pathlib.Path",
+        upstream_cache_tracker: "Mapping[str, Tuple[bytes, int]]",
+    ) -> "Sequence[Tuple[pathlib.Path, Tuple[bytes, int]]]":
         pass
 
     def digest_upstream_dir_entries(
-        self, dir_entries: "Sequence[pathlib.Path]"
+        self, dir_entries: "Sequence[Tuple[pathlib.Path, Tuple[bytes, int]]]"
     ) -> "None":
         # Now, let's process this
-        for entry in dir_entries:
+        for entry, fingerprint in dir_entries:
             for mappings_batch_or_delete_list in self.digest_upstream_file(entry):
                 if isinstance(mappings_batch_or_delete_list, dict):
                     self._commit_batch(mappings_batch_or_delete_list)
@@ -192,6 +199,9 @@ class OfflineAbstractPubEnricher(AbstractPubEnricher):
                     )
                 else:
                     self.logger.error("FIXME: an anomaly!!!!")
+
+            # When it was properly processed is when the fingerprint is preserved
+            self._upstream_cache_tracker[entry.name] = fingerprint
 
         self.pubC.populate_citations_from_refs(
             self.Name(),
