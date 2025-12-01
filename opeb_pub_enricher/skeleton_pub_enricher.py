@@ -128,6 +128,9 @@ class PubEnricherException(Exception):
     pass
 
 
+DirMaxSize = 1000
+
+
 class SkeletonPubEnricher(ABC):
     DEFAULT_STEP_SIZE = 50
     DEFAULT_NUM_FILES_PER_DIR = 1000
@@ -1411,15 +1414,26 @@ class SkeletonPubEnricher(ABC):
                         jsonOutput.write(self.je.encode(entry))
                 elif results_format == "multiple":
                     filename_prefix = "entry_" if verbosityLevel == 0 else "fullentry_"
+                    relDirCreatedSet = set()
                     for idx, entry in enumerate(entries_slice):
-                        rel_dest_file = filename_prefix + str(start + idx) + ".json"
+                        numentry = start + idx
+                        subRel = "{0:06d}".format((numentry // DirMaxSize) * DirMaxSize)
+                        absDir = os.path.join(results_path, subRel)
+
+                        if subRel not in relDirCreatedSet:
+                            os.makedirs(absDir, exist_ok=True)
+                            relDirCreatedSet.add(subRel)
+
+                        rel_dest_file = os.path.join(
+                            subRel, filename_prefix + str(numentry) + ".json"
+                        )
                         saved_results.append(
                             {
                                 "@id": entry["@id"],
                                 "file": rel_dest_file,
                             }
                         )
-                        dest_file = os.path.join(results_path, rel_dest_file)
+                        dest_file = os.path.join(absDir, rel_dest_file)
                         with open(dest_file, mode="w", encoding="utf-8") as outentry:
                             outentry.write(self.je.encode(entry))
 
