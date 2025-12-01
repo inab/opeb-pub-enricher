@@ -1433,7 +1433,7 @@ class SkeletonPubEnricher(ABC):
                                 "file": rel_dest_file,
                             }
                         )
-                        dest_file = os.path.join(absDir, rel_dest_file)
+                        dest_file = os.path.join(results_path, rel_dest_file)
                         with open(dest_file, mode="w", encoding="utf-8") as outentry:
                             outentry.write(self.je.encode(entry))
 
