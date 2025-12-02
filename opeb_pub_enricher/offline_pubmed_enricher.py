@@ -56,9 +56,9 @@ from . import pub_common
 
 
 class OfflinePubmedEnricher(OfflineAbstractPubEnricher):
-    PUBMED_BASELINE_URL: "Final[str]" = "ftp://ftp.ncbi.nlm.nih.gov/pubmed/baseline/"
+    PUBMED_BASELINE_URL: "Final[str]" = "https://ftp.ncbi.nlm.nih.gov/pubmed/baseline/"
     PUBMED_UPDATEFILES_URL: "Final[str]" = (
-        "ftp://ftp.ncbi.nlm.nih.gov/pubmed/updatefiles/"
+        "https://ftp.ncbi.nlm.nih.gov/pubmed/updatefiles/"
     )
 
     BATCH_THRESHOLD = 10240
@@ -90,11 +90,11 @@ class OfflinePubmedEnricher(OfflineAbstractPubEnricher):
         updatefiles_cache_dir.mkdir(parents=True, exist_ok=True)
 
         command_script = f"""\
-open {parsed_baseline_url.netloc}
-mirror -c -e --scan-all-first --verbose {parsed_baseline_url.path} {baseline_cache_dir.as_posix()}
+open {parsed_baseline_url.scheme}://{parsed_baseline_url.netloc}
+mirror -e --scan-all-first --delete-first --verbose {parsed_baseline_url.path} {baseline_cache_dir.as_posix()}
 close
-open {parsed_updatefiles_url.netloc}
-mirror -c -e --scan-all-first --verbose {parsed_updatefiles_url.path} {updatefiles_cache_dir.as_posix()}
+open {parsed_updatefiles_url.scheme}://{parsed_updatefiles_url.netloc}
+mirror -e --scan-all-first --delete-first --verbose {parsed_updatefiles_url.path} {updatefiles_cache_dir.as_posix()}
 close
 quit
     """
