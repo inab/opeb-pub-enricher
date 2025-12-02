@@ -57,6 +57,7 @@ if TYPE_CHECKING:
         CURIE,
         EnricherId,
         QualifiedWinner,
+        SourceId,
     )
 
     from .abstract_pub_enricher import (
@@ -341,6 +342,10 @@ class MetaEnricher(SkeletonPubEnricher):
     @classmethod
     def Name(cls) -> "EnricherId":
         return cls.META_SOURCE
+
+    @classmethod
+    def DefaultSource(cls) -> "SourceId":
+        return cast("SourceId", "meta")
 
     # Specific methods
     def _mergeFoundPubs(self, found_pubs: "Sequence[IdMapping]") -> "IdMapping":
