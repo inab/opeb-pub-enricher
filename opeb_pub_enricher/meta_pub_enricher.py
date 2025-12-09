@@ -91,7 +91,7 @@ class MetaEnricherException(Exception):
 
 def _multiprocess_target(
     qr: "multiprocessing.Queue[Tuple[str, Tuple[Any,...]]]",
-    qs: "multiprocessing.Queue[Any]",
+    qs: "multiprocessing.Queue[Tuple[Any, Optional[str]]]",
     enricher_class: "Type[ImplementedEnricher]",
     *args: "Any",
 ) -> "None":
@@ -99,14 +99,15 @@ def _multiprocess_target(
     enricher: "Optional[ImplementedEnricher]" = None
     try:
         enricher = enricher_class(*args)  # type: ignore[abstract]
-        qs.put(True)
+        qs.put((True, None))
     except BaseException:
         enricher = None
-        qs.put(traceback.format_exc())
+        qs.put((None, traceback.format_exc()))
 
     while enricher is not None:
         command, params = qr.get()
         retv: "Any" = None
+        retv_exc: "Optional[str]" = None
         try:
             method: "Optional[Union[Callable[[Sequence[QueryId]], Sequence[IdMapping]], Callable[[Sequence[OpebEntryPub] | Sequence[IdMapping] | Sequence[BrokenWinner | QualifiedWinner], float, int], Sequence[GatheredCitRefs] | Sequence[GatheredCitRefStats]], Callable[[], SkeletonPubEnricher], Callable[[type[BaseException] | None, BaseException | None, TracebackType | None], Literal[True] | Any | None]]]"
             if command == "cachedQueryPubIds":
@@ -133,15 +134,15 @@ def _multiprocess_target(
                 retv = True
         except BaseException:
             # It seems it is not possible to pickle exceptions
-            retv = traceback.format_exc()
+            retv_exc = traceback.format_exc()
         finally:
-            qs.put(retv)
+            qs.put((retv, retv_exc))
 
 
 def _multiprocess_wrapper(
     enricher_class: "Type[ImplementedEnricher]", *args: "Any"
-) -> "Tuple[multiprocessing.Process, multiprocessing.Queue[Any], multiprocessing.Queue[Tuple[str, Tuple[Any,...]]]]":
-    eqr: "multiprocessing.Queue[Any]" = multiprocessing.Queue()
+) -> "Tuple[multiprocessing.Process, multiprocessing.Queue[Tuple[str, Tuple[Any,...]]], multiprocessing.Queue[Tuple[Any, Optional[str]]]]":
+    eqr: "multiprocessing.Queue[Tuple[Any, Optional[str]]]" = multiprocessing.Queue()
     eqs: "multiprocessing.Queue[Tuple[str, Tuple[Any,...]]]" = multiprocessing.Queue()
 
     ep = multiprocessing.Process(
@@ -248,7 +249,7 @@ class MetaEnricher(SkeletonPubEnricher):
             else self.RECOGNIZED_BACKENDS_HASH.keys()
         )
 
-        enrichers_pool: "OrderedDict[str, Tuple[multiprocessing.Process, multiprocessing.Queue[Tuple[str, Tuple[Any,...]]], multiprocessing.Queue[Any], str]]" = OrderedDict()
+        enrichers_pool: "OrderedDict[str, Tuple[multiprocessing.Process, multiprocessing.Queue[Tuple[str, Tuple[Any,...]]], multiprocessing.Queue[Tuple[Any, Optional[str]]], str]]" = OrderedDict()
         for enricher_name in use_enrichers:
             enricher_class = self.RECOGNIZED_BACKENDS_HASH.get(enricher_name)
             if enricher_class:
@@ -290,6 +291,7 @@ class MetaEnricher(SkeletonPubEnricher):
         )
 
         self.enrichers_pool = enrichers_pool
+        self.entered_enrichers_pool: "OrderedDict[str, Tuple[multiprocessing.Process, multiprocessing.Queue[Tuple[str, Tuple[Any,...]]], multiprocessing.Queue[Tuple[Any, Optional[str]]], str]]" = OrderedDict()
 
     def __del__(self) -> "None":
         # Try terminating subordinated processes
@@ -298,23 +300,35 @@ class MetaEnricher(SkeletonPubEnricher):
                 eptuple[0].terminate()
 
         self.enrichers_pool = OrderedDict()
+        self.entered_enrichers_pool = OrderedDict()
 
     def __enter__(self) -> "MetaEnricher":
+        if len(self.entered_enrichers_pool) > 0:
+            raise MetaEnricherException("Tried to __enter__ more than once!!!!", [])
+
         super().__enter__()
         params = ()
         for eptuple in self.enrichers_pool.values():
             eptuple[1].put(("enter", params))
 
         exc: "MutableSequence[Tuple[str, Any]]" = []
-        for eptuple in self.enrichers_pool.values():
-            retval = eptuple[2].get()
+        for enricher_name, eptuple in self.enrichers_pool.items():
+            retval, retval_exc = eptuple[2].get()
 
-            if isinstance(retval, str):
-                exc.append((eptuple[3], retval))
+            if isinstance(retval_exc, str):
+                exc.append((eptuple[3], retval_exc))
+            else:
+                self.entered_enrichers_pool[enricher_name] = eptuple
 
         if len(exc) > 0:
             self.__del__()
             raise MetaEnricherException("__enter__ nested exception", exc)
+
+        if len(self.entered_enrichers_pool) == 0:
+            raise MetaEnricherException(
+                f"Unable to __enter__ on any of the nested enrichers: {', '.join(self.enrichers_pool.keys())}",
+                exc,
+            )
 
         return self
 
@@ -324,15 +338,21 @@ class MetaEnricher(SkeletonPubEnricher):
         exc_val: "Optional[BaseException]",
         exc_tb: "Optional[TracebackType]",
     ) -> "Union[Literal[True], Any, None]":
+        if len(self.entered_enrichers_pool) == 0:
+            raise MetaEnricherException("Tried to __exit__ more than once!!!!", [])
+
         super().__exit__(exc_type, exc_val, exc_tb)
         params = (exc_type, exc_val, exc_tb)
-        for eptuple in self.enrichers_pool.values():
+        for eptuple in self.entered_enrichers_pool.values():
             eptuple[1].put(("exit", params))
 
-        for eptuple in self.enrichers_pool.values():
+        for enricher_name, eptuple in self.entered_enrichers_pool.items():
             # Ignore exceptions, as it should happen in __exit__ handlers
-            eptuple[2].get()
-            # retval = eptuple[2].get()
+            retval, retval_exc = eptuple[2].get()
+            if retval_exc is not None:
+                self.logger.warning(
+                    f"__exit__ nested exception from enricher {enricher_name}: {retval_exc}"
+                )
 
         return self
 
@@ -499,25 +519,33 @@ class MetaEnricher(SkeletonPubEnricher):
         return merged_results
 
     def queryPubIdsBatch(self, query_ids: "Sequence[QueryId]") -> "Sequence[IdMapping]":
+        if len(self.entered_enrichers_pool) == 0:
+            raise MetaEnricherException(
+                "Use a 'with' context in order to use 'queryPubIdsBatch' method", []
+            )
+
         # Spawning the work among the jobs
         params = (query_ids,)
-        for ep, eqs, eqr, enricher_name in self.enrichers_pool.values():
+        for ep, eqs, eqr, enricher_name in self.entered_enrichers_pool.values():
             # We need the queue to request the results
             eqs.put(("cachedQueryPubIds", params))
 
         # Now, we gather the work of all threaded enrichers
         merging_list: "MutableSequence[IdMapping]" = []
         exc: "MutableSequence[Tuple[str, str]]" = []
-        for ep, eqs, eqr, enricher_name in self.enrichers_pool.values():
+        for ep, eqs, eqr, enricher_name in self.entered_enrichers_pool.values():
             # wait for it
             # The result (or the exception) is in the queue
-            gathered_pairs: "Union[str, Sequence[IdMapping]]" = eqr.get()
+            gathered_pairs: "Optional[Sequence[IdMapping]]"
+            gathered_pairs_exc: "Optional[str]"
+            gathered_pairs, gathered_pairs_exc = eqr.get()
 
             # Kicking up the exception, so it is managed elsewhere
-            if isinstance(gathered_pairs, str):
-                exc.append((enricher_name, gathered_pairs))
+            if isinstance(gathered_pairs_exc, str):
+                exc.append((enricher_name, gathered_pairs_exc))
                 continue
             else:
+                assert gathered_pairs is not None
                 # Labelling the results, so we know the enricher
                 for gathered_pair in gathered_pairs:
                     gathered_pair["enricher"] = enricher_name
@@ -718,6 +746,10 @@ class MetaEnricher(SkeletonPubEnricher):
                         pubYear: year of publication
                         journalAbbreviation: Journal Abbriviations
         """
+        if len(self.entered_enrichers_pool) == 0:
+            raise MetaEnricherException(
+                "Use a 'with' context in order to use 'queryCitRefsBatch' method", []
+            )
 
         # The publications are clustered by their original enricher
         clustered_pubs: "MutableMapping[str, MutableSequence[Tuple[Union[GatheredCitations, GatheredReferences, GatheredCitRefs], int, int]]]" = {}
@@ -756,7 +788,7 @@ class MetaEnricher(SkeletonPubEnricher):
         # After clustering, issue the batch calls to each enricher in parallel
         eptuples = []
         for enricher_name, c_base_pubs in clustered_pubs.items():
-            eptuple = self.enrichers_pool[enricher_name]
+            eptuple = self.entered_enrichers_pool[enricher_name]
 
             # Use the verbosity level we need: 1.5
             eptuple[1].put(
@@ -771,7 +803,7 @@ class MetaEnricher(SkeletonPubEnricher):
         exc = []
         for ep, eqs, eqr, enricher_name in eptuples:
             # The result (or the exception) is in the queue
-            possible_exception = eqr.get()
+            possible_result, possible_exception = eqr.get()
 
             # Kicking up the exception, so it is managed elsewhere
             if isinstance(possible_exception, str):
@@ -782,7 +814,7 @@ class MetaEnricher(SkeletonPubEnricher):
             # reconcile
             c_base_pubs = clustered_pubs[enricher_name]
             for new_base_pub, bp_ids in zip(
-                possible_exception, map(lambda bp: bp[1:], c_base_pubs)
+                possible_result, map(lambda bp: bp[1:], c_base_pubs)
             ):
                 linear_id = bp_ids[0]
                 i_base_pub = bp_ids[1]

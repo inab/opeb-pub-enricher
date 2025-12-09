@@ -279,6 +279,14 @@ CREATE TABLE idmap (
 	FOREIGN KEY (enricher,id,source) REFERENCES pub(enricher,id,source) ON DELETE CASCADE ON UPDATE CASCADE
 )
 """)
+                # Index on the enricher
+                cur.execute("""\
+CREATE INDEX idmap_enricher ON idmap(enricher)
+""")
+                # Index on the id and the source
+                cur.execute("""\
+CREATE INDEX idmap_id_source ON idmap(id,source)
+""")
                 # Index on the last_fetched
                 cur.execute("""\
 CREATE INDEX idmap_l_f ON idmap(last_fetched)
