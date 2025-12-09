@@ -4,6 +4,7 @@ from collections import OrderedDict
 import copy
 
 import multiprocessing
+import time
 import traceback
 
 from typing import (
@@ -191,6 +192,8 @@ class MetaEnricher(SkeletonPubEnricher):
         "references",
     }
 
+    DEFAULT_ADDITIONAL_SLEEP: "Final[int]" = 60
+
     @overload
     def __init__(
         self,
@@ -240,8 +243,11 @@ class MetaEnricher(SkeletonPubEnricher):
         # Create the instances needed by this meta enricher
         if config is not None:
             use_enrichers_str = config.get(section_name, "use_enrichers", fallback=None)
+            keep_going = config.getboolean(section_name, "keep_going", fallback=False)
         else:
             use_enrichers_str = None
+            keep_going = False
+        self.keep_going = keep_going
 
         use_enrichers = (
             use_enrichers_str.split(",")
@@ -317,12 +323,16 @@ class MetaEnricher(SkeletonPubEnricher):
 
             if isinstance(retval_exc, str):
                 exc.append((eptuple[3], retval_exc))
+                self.logger.warning(
+                    f"Enricher {eptuple[3]} could not be instantiated: retval_exc"
+                )
             else:
                 self.entered_enrichers_pool[enricher_name] = eptuple
 
         if len(exc) > 0:
-            self.__del__()
-            raise MetaEnricherException("__enter__ nested exception", exc)
+            if not self.keep_going:
+                self.__del__()
+                raise MetaEnricherException("__enter__ nested exception", exc)
 
         if len(self.entered_enrichers_pool) == 0:
             raise MetaEnricherException(
@@ -526,35 +536,57 @@ class MetaEnricher(SkeletonPubEnricher):
 
         # Spawning the work among the jobs
         params = (query_ids,)
-        for ep, eqs, eqr, enricher_name in self.entered_enrichers_pool.values():
-            # We need the queue to request the results
-            eqs.put(("cachedQueryPubIds", params))
-
-        # Now, we gather the work of all threaded enrichers
+        queryable_enrichers_pool = list(self.entered_enrichers_pool.values())
+        retries = 0
+        additional_sleep = self.DEFAULT_ADDITIONAL_SLEEP
         merging_list: "MutableSequence[IdMapping]" = []
         exc: "MutableSequence[Tuple[str, str]]" = []
-        for ep, eqs, eqr, enricher_name in self.entered_enrichers_pool.values():
-            # wait for it
-            # The result (or the exception) is in the queue
-            gathered_pairs: "Optional[Sequence[IdMapping]]"
-            gathered_pairs_exc: "Optional[str]"
-            gathered_pairs, gathered_pairs_exc = eqr.get()
+        while len(queryable_enrichers_pool) > 0 and retries <= self.max_retries:
+            if retries > 0:
+                # Using a backoff time of 2 seconds when some recoverable error happens
+                time.sleep(additional_sleep + 2**retries)
 
-            # Kicking up the exception, so it is managed elsewhere
-            if isinstance(gathered_pairs_exc, str):
-                exc.append((enricher_name, gathered_pairs_exc))
-                continue
+            retry_enrichers_pool = []
+            for ep, eqs, eqr, enricher_name in queryable_enrichers_pool:
+                # We need the queue to request the results
+                eqs.put(("cachedQueryPubIds", params))
+
+            # Now, we gather the work of all threaded enrichers
+            for ep, eqs, eqr, enricher_name in queryable_enrichers_pool:
+                # wait for it
+                # The result (or the exception) is in the queue
+                gathered_pairs: "Optional[Sequence[IdMapping]]"
+                gathered_pairs_exc: "Optional[str]"
+                gathered_pairs, gathered_pairs_exc = eqr.get()
+
+                # Kicking up the exception, so it is managed elsewhere
+                if isinstance(gathered_pairs_exc, str):
+                    exc.append((enricher_name, gathered_pairs_exc))
+                    retry_enrichers_pool.append((ep, eqs, eqr, enricher_name))
+                elif gathered_pairs is not None:
+                    # Labelling the results, so we know the enricher
+                    for gathered_pair in gathered_pairs:
+                        gathered_pair["enricher"] = enricher_name
+
+                    merging_list.extend(gathered_pairs)
+                else:
+                    raise MetaEnricherException(
+                        f"Unexpected None answer from enricher {enricher_name}"
+                    )
+
+            queryable_enrichers_pool = retry_enrichers_pool
+            retries += 1
+
+        if len(queryable_enrichers_pool) > 0:
+            if self.keep_going and len(queryable_enrichers_pool) < len(
+                self.entered_enrichers_pool
+            ):
+                self.logger.warning(
+                    f"Keep going although some enrichers failed on queryPubIdsBatchs: {exc}"
+                )
             else:
-                assert gathered_pairs is not None
-                # Labelling the results, so we know the enricher
-                for gathered_pair in gathered_pairs:
-                    gathered_pair["enricher"] = enricher_name
-
-                merging_list.extend(gathered_pairs)
-
-        if len(exc) > 0:
-            self.__del__()
-            raise MetaEnricherException("queryPubIdsBatch nested exception", exc)
+                self.__del__()
+                raise MetaEnricherException("queryPubIdsBatch nested exception", exc)
 
         # and we process it
         merged_results = self._mergeFoundPubsList(merging_list)
@@ -786,44 +818,68 @@ class MetaEnricher(SkeletonPubEnricher):
                         self.logger.warning(f"FIXME\n{base_pub}")
 
         # After clustering, issue the batch calls to each enricher in parallel
-        eptuples = []
-        for enricher_name, c_base_pubs in clustered_pubs.items():
-            eptuple = self.entered_enrichers_pool[enricher_name]
-
-            # Use the verbosity level we need: 1.5
-            eptuple[1].put(
-                (
-                    "listReconcileCitRefMetricsBatch",
-                    (list(map(lambda bp: bp[0], c_base_pubs)), 1.5, mode),
-                )
-            )
-            eptuples.append(eptuple)
-
-        # Joining all the threads
+        queried_enrichers: "Set[str]" = set()
         exc = []
-        for ep, eqs, eqr, enricher_name in eptuples:
-            # The result (or the exception) is in the queue
-            possible_result, possible_exception = eqr.get()
+        retries = 0
+        additional_sleep = self.DEFAULT_ADDITIONAL_SLEEP
+        while (
+            len(queried_enrichers) < len(clustered_pubs) and retries < self.max_retries
+        ):
+            if retries > 0:
+                # Using a backoff time of 2 seconds when some recoverable error happens
+                time.sleep(additional_sleep + 2**retries)
 
-            # Kicking up the exception, so it is managed elsewhere
-            if isinstance(possible_exception, str):
-                exc.append((enricher_name, possible_exception))
-                continue
+            eptuples = []
+            for enricher_name, c_base_pubs in clustered_pubs.items():
+                if enricher_name in queried_enrichers:
+                    # Skip this
+                    continue
 
-            # As the method enriches the results in place
-            # reconcile
-            c_base_pubs = clustered_pubs[enricher_name]
-            for new_base_pub, bp_ids in zip(
-                possible_result, map(lambda bp: bp[1:], c_base_pubs)
-            ):
-                linear_id = bp_ids[0]
-                i_base_pub = bp_ids[1]
+                eptuple = self.entered_enrichers_pool[enricher_name]
 
-                linear_pubs[linear_id]["base_pubs"][i_base_pub] = new_base_pub
+                # Use the verbosity level we need: 1.5
+                eptuple[1].put(
+                    (
+                        "listReconcileCitRefMetricsBatch",
+                        (list(map(lambda bp: bp[0], c_base_pubs)), 1.5, mode),
+                    )
+                )
+                eptuples.append(eptuple)
 
-        if len(exc) > 0:
-            self.__del__()
-            raise MetaEnricherException("queryCitRefsBatch nested exception", exc)
+            # Joining all the threads
+            for ep, eqs, eqr, enricher_name in eptuples:
+                # The result (or the exception) is in the queue
+                possible_result, possible_exception = eqr.get()
+
+                # Kicking up the exception, so it is managed elsewhere
+                if isinstance(possible_exception, str):
+                    exc.append((enricher_name, possible_exception))
+                    continue
+
+                # As the method enriches the results in place
+                # reconcile
+                c_base_pubs = clustered_pubs[enricher_name]
+                for new_base_pub, bp_ids in zip(
+                    possible_result, map(lambda bp: bp[1:], c_base_pubs)
+                ):
+                    linear_id = bp_ids[0]
+                    i_base_pub = bp_ids[1]
+
+                    linear_pubs[linear_id]["base_pubs"][i_base_pub] = new_base_pub
+
+                # Finished the work with this enricher
+                queried_enrichers.add(enricher_name)
+
+            retries += 1
+
+        if len(queried_enrichers) < len(clustered_pubs):
+            if self.keep_going and len(queried_enrichers) > 0:
+                self.logger.warning(
+                    f"Keep going although some enrichers failed on queryCitRefsBatch: {exc}"
+                )
+            else:
+                self.__del__()
+                raise MetaEnricherException("queryCitRefsBatch nested exception", exc)
 
         # At last, reconcile!!!!!
         for merged_pub in linear_pubs:

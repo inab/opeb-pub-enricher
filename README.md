@@ -4,7 +4,7 @@ This is the code repository of the OpenEBench publications enricher used in Open
 
 Depending on the chosen flags, it fetches from OpenEBench technical toolbox REST API (which follows [next JSON Schema](https://openebench.bsc.es/monitor/tool/tool.json), [source from repo here](https://github.com/inab/elixibilitas/blob/master/java/elixibilitas-rest/src/main/resources/META-INF/resources/tool.json)) the list of tools, along with their registered PubMed Id , DOI or PubMedCentral Id. Only tools with such information are considered.
 
-The extracted publication identifiers are validated against the enabled publication repositories (currently supported PubMed, EuropePMC and WikiData), gathering for the valid identifiers additional information, like the journal, year, authors, references and citations.
+The extracted publication identifiers are validated against the enabled publication repositories (currently supported PubMed, Offline PubMed, EuropePMC and WikiData), gathering for the valid identifiers additional information, like the journal, year, authors, references and citations.
 
 ## Installation requirements
 
@@ -14,41 +14,40 @@ This program was initially written for Python 3.5 and later. The installation pr
 Once the program is installed, and its environment activated, you can see the different options using `-h` flag:
 
 ```
-usage: pubEnricher.py [-h] [-F] [--fully-annotated] [-d]
-                      [-b {europepmc,pubmed,wikidata,meta}]
-                      [-C CONFIG_FILENAME] [--save-opeb SAVE_OPEB_FILENAME]
-                      [--use-opeb LOAD_OPEB_FILENAME]
-                      (-D RESULTS_DIR | -f RESULTS_FILE | -p RESULTS_PATH)
+usage: pubEnricher.py [-h] [--log-file LOGFILENAME] [--log-format LOGFORMAT] [-q] [-v] [-d] [-F] [--fully-annotated]
+                      [-b {europepmc,pubmed,wikidata,offline_pubmed,meta}] [-C CONFIG_FILENAME] [--save-opeb SAVE_OPEB_FILENAME]
+                      [--use-opeb LOAD_OPEB_FILENAME] (-D RESULTS_DIR | -f RESULTS_FILE | -p RESULTS_PATH)
                       [--format {single,multiple,flat}]
                       [cacheDir]
 
 positional arguments:
   cacheDir              The optional cache directory, to be reused
 
-optional arguments:
+options:
   -h, --help            show this help message and exit
-  -F, --full            Return the full gathered citation results, not the
-                        citation stats by year
-  --fully-annotated     Return the reference and citation results fully
-                        annotated, not only the year
-  -d, --debug           Show the URL statements
-  -b {europepmc,pubmed,wikidata,meta}, --backend {europepmc,pubmed,wikidata,meta}
+  --log-file LOGFILENAME
+                        Store messages in a file instead of using standard error and standard output
+  --log-format LOGFORMAT
+                        Format of log messages (for instance %(asctime)-15s - [%(levelname)s] %(message)s)
+  -q, --quiet           Only show engine warnings and errors
+  -v, --verbose         Show verbose (informational) messages
+  -d, --debug           Show debug messages, including URLs (use with care, as it could potentially disclose sensitive contents)
+  -F, --full            Return the full gathered citation results, not the citation stats by year
+  --fully-annotated     Return the reference and citation results fully annotated, not only the year
+  -b {europepmc,pubmed,wikidata,offline_pubmed,meta}, --backend {europepmc,pubmed,wikidata,offline_pubmed,meta}
                         Choose the enrichment backend
   -C CONFIG_FILENAME, --config CONFIG_FILENAME
-                        Config file to pass setup parameters to the different
-                        enrichers
+                        Config file to pass setup parameters to the different enrichers
   --save-opeb SAVE_OPEB_FILENAME
                         Save the OpenEBench content to a file
   --use-opeb LOAD_OPEB_FILENAME
-                        Use the OpenEBench content from a file instead of
-                        network
+                        Use the OpenEBench content from a file instead of network
   -D RESULTS_DIR, --directory RESULTS_DIR
                         Store each separated result in the given directory
   -f RESULTS_FILE, --file RESULTS_FILE
                         The results file, in JSON format
   -p RESULTS_PATH, --path RESULTS_PATH
-                        The path to the results. Depending on the format, it
-                        may be a file or a directory
+                        The path to the results. Depending on the format, it may be a file or a directory
   --format {single,multiple,flat}
                         The output format to be used
 ```
