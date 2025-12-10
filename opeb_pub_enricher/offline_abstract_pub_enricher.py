@@ -102,7 +102,10 @@ class OfflineAbstractPubEnricher(AbstractPubEnricher):
         with self._upstream_cache_tracker.transact():
             dir_entries = self.mirror_upstream(
                 self._upstream_cache_dir,
-                cast("Mapping[str, Tuple[bytes, int]]", self._upstream_cache_tracker),
+                cast(
+                    "Mapping[str, Tuple[bytes, int, float]]",
+                    self._upstream_cache_tracker,
+                ),
             )
 
         if len(dir_entries) > 0:
@@ -163,50 +166,54 @@ class OfflineAbstractPubEnricher(AbstractPubEnricher):
     def mirror_upstream(
         self,
         upstream_cache_dir: "pathlib.Path",
-        upstream_cache_tracker: "Mapping[str, Tuple[bytes, int]]",
-    ) -> "Sequence[Tuple[pathlib.Path, Tuple[bytes, int]]]":
+        upstream_cache_tracker: "Mapping[str, Tuple[bytes, int, float]]",
+    ) -> "Sequence[Tuple[pathlib.Path, Tuple[bytes, int, float], bool]]":
         pass
 
     def digest_upstream_dir_entries(
-        self, dir_entries: "Sequence[Tuple[pathlib.Path, Tuple[bytes, int]]]"
+        self,
+        dir_entries: "Sequence[Tuple[pathlib.Path, Tuple[bytes, int, float], bool]]",
     ) -> "None":
         # Now, let's process this
         do_recompute_citations = False
-        for entry, fingerprint in dir_entries:
-            for mappings_batch_or_delete_list in self.digest_upstream_file(entry):
-                if isinstance(mappings_batch_or_delete_list, dict):
-                    self._commit_batch(mappings_batch_or_delete_list)
-                elif isinstance(mappings_batch_or_delete_list, list):
-                    self.pubC.removeCachedMappings(
-                        mappings_batch_or_delete_list,
-                        delete_stale_cache=self.DefaultDeleteStaleCache(),
-                    )
-                    self.pubC.clearCitRefs(
-                        (
-                            (
-                                (p_elem["source"], p_elem["id"]),
-                                False,
-                            )
-                            for p_elem in mappings_batch_or_delete_list
+        for entry, fingerprint, do_digestion in dir_entries:
+            # do_digestion is false when only fingerprint metadata
+            # has to be updated
+            if do_digestion:
+                for mappings_batch_or_delete_list in self.digest_upstream_file(entry):
+                    if isinstance(mappings_batch_or_delete_list, dict):
+                        self._commit_batch(mappings_batch_or_delete_list)
+                    elif isinstance(mappings_batch_or_delete_list, list):
+                        self.pubC.removeCachedMappings(
+                            mappings_batch_or_delete_list,
+                            delete_stale_cache=self.DefaultDeleteStaleCache(),
                         )
-                    )
-                    self.pubC.clearCitRefs(
-                        (
+                        self.pubC.clearCitRefs(
                             (
-                                (p_elem["source"], p_elem["id"]),
-                                True,
+                                (
+                                    (p_elem["source"], p_elem["id"]),
+                                    False,
+                                )
+                                for p_elem in mappings_batch_or_delete_list
                             )
-                            for p_elem in mappings_batch_or_delete_list
                         )
-                    )
-                else:
-                    self.logger.error("FIXME: an anomaly!!!!")
+                        self.pubC.clearCitRefs(
+                            (
+                                (
+                                    (p_elem["source"], p_elem["id"]),
+                                    True,
+                                )
+                                for p_elem in mappings_batch_or_delete_list
+                            )
+                        )
+                    else:
+                        self.logger.error("FIXME: an anomaly!!!!")
+
+                do_recompute_citations = True
 
             # When it was properly processed is when the fingerprint is preserved
             with self._upstream_cache_tracker.transact():
                 self._upstream_cache_tracker[entry.name] = fingerprint
-
-            do_recompute_citations = True
 
         if do_recompute_citations:
             self.pubC.populate_citations_from_refs(
