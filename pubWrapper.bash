@@ -55,7 +55,7 @@ if [ $# -eq 3 ] ; then
 		"${SCRIPTDIR}"/opeb-submitter/result_submitter.bash "${cronSubmitterConfig}" "$workDir"
 		
 		# This is needed to keep a copy of the source along with the results
-		xz -c "$toolsFileXZ" > "${workDir}"/"$(basename "${toolsFile}")"
+		unxz -c "$toolsFileXZ" > "${workDir}"/"$(basename "${toolsFile}")"
 		tar -C "${parentCacheDir}" -c -p -f - "${relWorkDir}" | xz -9 -c -T0 > "${parentCacheDir}"/"$(basename "$(dirname "$0")")"-"${relWorkDir}".tar.xz
 		rm -rf "${workDir}"
 	else
