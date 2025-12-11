@@ -1093,10 +1093,15 @@ class SkeletonPubEnricher(ABC):
             # There can be corrupted or incomplete entries
             # in the source
             source_id = partial_mapping.get("source")
+            no_id = all(
+                map(
+                    lambda ke: partial_mapping.get(ke) is None, ("pmid", "doi", "pmcid")
+                )
+            )
             if (
                 _id is not None
                 and source_id is not None
-                and (pubYear is None or not onlyYear)
+                and (no_id or pubYear is None or not onlyYear)
             ):
                 mapping = self.pubC.getCachedMapping((source_id, _id))
 
@@ -1104,7 +1109,9 @@ class SkeletonPubEnricher(ABC):
                 if mapping is None:
                     populable_mappings.append(partial_mapping)
                 else:
-                    self.populateMapping(mapping, partial_mapping, onlyYear)
+                    self.populateMapping(
+                        mapping, partial_mapping, onlyYear=onlyYear and not no_id
+                    )
 
         if len(populable_mappings) > 0:
             for start in range(0, len(populable_mappings), self.step_size):
@@ -1122,11 +1129,18 @@ class SkeletonPubEnricher(ABC):
                     populable_mappings_slice, populable_mappings_clone_slice
                 ):
                     # It is a kind of indicator the 'year' flag
-                    if p_m_c.get("year") is not None:
+                    some_id = any(
+                        map(
+                            lambda ke: p_m_c.get(ke) is not None,
+                            ("pmid", "doi", "pmcid", "year"),
+                        )
+                    )
+                    if some_id:
                         self.pubC.setCachedMapping(
                             p_m_c, delete_stale_cache=delete_stale_cache
                         )
-                        self.populateMapping(p_m_c, p_m, onlyYear)
+                        # This is more preventive
+                        self.populateMapping(p_m_c, p_m, onlyYear=False)
 
         return cast("Sequence[IdMapping]", partial_mappings)
 
