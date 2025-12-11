@@ -507,17 +507,16 @@ class PubmedEnricher(AbstractPubEnricher):
                                 cite_res[citrefs_key] = None  # type: ignore[literal-required]
                                 cite_res[citrefs_count_key] = 0  # type: ignore[literal-required]
 
-                        # Now, issue the batch query
-                        if not minimal and (len(citrefsG) > 0):
-                            self.populatePubIds(citrefsG, onlyYear=True)
+                        # # Now, issue the batch query
+                        # if not minimal and (len(citrefsG) > 0):
+                        #     self.populatePubIds(citrefsG, onlyYear=True)
 
                         # Saving it for later processing
                         cite_res_arr.append(cite_res)
 
-                if citrefsG:
+                if not minimal and (len(citrefsG) > 0):
                     # Now, issue the last batch query
                     self.populatePubIds(citrefsG, onlyYear=True)
 
                 # And propagate the batch of results!
-                for cite_res in cite_res_arr:
-                    yield cite_res
+                yield from cite_res_arr
