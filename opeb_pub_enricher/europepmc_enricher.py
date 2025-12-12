@@ -132,12 +132,12 @@ class EuropePMCEnricher(AbstractPubEnricher):
 
             for source_id, clustered_partial in clustered_partial_mappings.items():
                 ext_string = (
-                    '( "' + '" or "'.join(clustered_partial) + '" )'
+                    "( " + " or ".join(clustered_partial) + " )"
                     if len(clustered_partial) > 1
-                    else '"' + clustered_partial[0] + '"'
+                    else str(clustered_partial[0])
                 )
                 raw_query_ids.append(
-                    '( SRC:"' + source_id + '" EXT_ID:' + ext_string + " )"
+                    "( SRC:" + source_id + " EXT_ID:" + ext_string + " )"
                 )
 
             # Now, with the unknown ones, let's ask the server
@@ -237,9 +237,9 @@ class EuropePMCEnricher(AbstractPubEnricher):
 
         if q_pubmed_ids:
             qstr_pubmed = (
-                '("' + '" or "'.join(q_pubmed_ids) + '")'
+                "(" + " or ".join(q_pubmed_ids) + ")"
                 if len(q_pubmed_ids) > 1
-                else '"' + q_pubmed_ids[0] + '"'
+                else q_pubmed_ids[0]
             )
             raw_query_ids.append("( SRC:MED EXT_ID:" + qstr_pubmed + " )")
 
@@ -253,9 +253,9 @@ class EuropePMCEnricher(AbstractPubEnricher):
 
         if q_pmc_ids:
             qstr_pmc = (
-                '("' + '" or "'.join(q_pmc_ids) + '")'
+                "(" + " or ".join(q_pmc_ids) + ")"
                 if len(q_pmc_ids) > 1
-                else '"' + q_pmc_ids[0] + '"'
+                else q_pmc_ids[0]
             )
             raw_query_ids.append("PMCID:" + qstr_pmc)
 
