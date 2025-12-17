@@ -275,9 +275,13 @@ CREATE TABLE idmap (
 	id VARCHAR(4096) NOT NULL,
 	source VARCHAR(32) NOT NULL,
 	last_fetched TIMESTAMP NOT NULL,
-	PRIMARY KEY (pub_id,id,enricher,source),
-	FOREIGN KEY (enricher,id,source) REFERENCES pub(enricher,id,source) ON DELETE CASCADE ON UPDATE CASCADE
+	PRIMARY KEY (pub_id,id,enricher,source)
 )
+""")
+
+                # Index on the pub_id
+                cur.execute("""\
+CREATE INDEX idmap_pub_id ON idmap(pub_id)
 """)
                 # Index on the enricher
                 cur.execute("""\
