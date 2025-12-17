@@ -40,8 +40,8 @@ if TYPE_CHECKING:
 
     from .pub_common import (
         EnricherId,
+        QualifiedId,
         SourceId,
-        UnqualifiedId,
     )
 
 
@@ -127,6 +127,11 @@ class OfflineAbstractPubEnricher(AbstractPubEnricher):
     def DefaultDeleteStaleCache(cls) -> "bool":
         return False
 
+    @classmethod
+    @abstractmethod
+    def ProvidesReferences(cls) -> "bool":
+        pass
+
     def queryPubIdsBatch(self, query_ids: "Sequence[QueryId]") -> "Sequence[IdMapping]":
         self.logger.warning(
             f"This method was called to query about {len(query_ids)} potential identifiers"
@@ -209,7 +214,7 @@ class OfflineAbstractPubEnricher(AbstractPubEnricher):
                     else:
                         self.logger.error("FIXME: an anomaly!!!!")
 
-                do_recompute_citations = True
+                do_recompute_citations = self.ProvidesReferences()
 
             # When it was properly processed is when the fingerprint is preserved
             with self._upstream_cache_tracker.transact():
@@ -226,12 +231,12 @@ class OfflineAbstractPubEnricher(AbstractPubEnricher):
     def digest_upstream_file(
         self,
         path: "pathlib.Path",
-    ) -> "Iterator[Union[MutableMapping[UnqualifiedId, Tuple[IdMapping, Sequence[Reference]]], Sequence[IdMappingMinimal]]]":
+    ) -> "Iterator[Union[MutableMapping[QualifiedId, Tuple[IdMapping, Sequence[Reference]]], Sequence[IdMappingMinimal]]]":
         pass
 
     def _commit_batch(
         self,
-        mappings_batch: "Mapping[UnqualifiedId, Tuple[IdMapping, Sequence[Reference]]]",
+        mappings_batch: "Mapping[QualifiedId, Tuple[IdMapping, Sequence[Reference]]]",
     ) -> "None":
         """Note: the batch must have unique values"""
         self.pubC.setCachedMappings(
@@ -240,28 +245,28 @@ class OfflineAbstractPubEnricher(AbstractPubEnricher):
             delete_stale_cache=self.DefaultDeleteStaleCache(),
         )
 
-        the_source_id = self.DefaultSource()
-        # This artificial separation is needed to avoid having the whole
-        # list of cited manuscripts in memory
-        self.pubC.clearCitRefs(
-            (
+        if self.ProvidesReferences():
+            # This artificial separation is needed to avoid having the whole
+            # list of cited manuscripts in memory
+            self.pubC.clearCitRefs(
                 (
-                    (the_source_id, pmid),
-                    False,
+                    (
+                        (mapping["source"], mapping["id"]),
+                        False,
+                    )
+                    for mapping, references in mappings_batch.values()
                 )
-                for pmid in mappings_batch.keys()
             )
-        )
-        # This artificial separation is needed to avoid having the whole
-        # list of cited manuscripts in memory
-        self.pubC.setCitRefs_ll(
-            (
+            # This artificial separation is needed to avoid having the whole
+            # list of cited manuscripts in memory
+            self.pubC.setCitRefs_ll(
                 (
-                    (the_source_id, mapping["id"]),
-                    references,
-                    False,
-                )
-                for mapping, references in mappings_batch.values()
-            ),
-            timestamp=pub_common.Timestamps.BiggestTimestamp(),
-        )
+                    (
+                        (mapping["source"], mapping["id"]),
+                        references,
+                        False,
+                    )
+                    for mapping, references in mappings_batch.values()
+                ),
+                timestamp=pub_common.Timestamps.BiggestTimestamp(),
+            )

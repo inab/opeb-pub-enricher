@@ -36,6 +36,7 @@ if TYPE_CHECKING:
 
     from .pub_common import (
         EnricherId,
+        QualifiedId,
         SourceId,
         UnqualifiedId,
     )
@@ -73,6 +74,10 @@ class OfflinePubmedEnricher(OfflineAbstractPubEnricher):
     @classmethod
     def DefaultSource(cls) -> "SourceId":
         return cls.PUBMED_SOURCE
+
+    @classmethod
+    def ProvidesReferences(cls) -> "bool":
+        return True
 
     def mirror_upstream(
         self,
@@ -156,9 +161,9 @@ quit
     def digest_upstream_file(
         self,
         path: "pathlib.Path",
-    ) -> "Iterator[Union[MutableMapping[UnqualifiedId, Tuple[IdMapping, Sequence[Reference]]], Sequence[IdMappingMinimal]]]":
+    ) -> "Iterator[Union[MutableMapping[QualifiedId, Tuple[IdMapping, Sequence[Reference]]], Sequence[IdMappingMinimal]]]":
         with gzip.open(path, mode="rb") as pH:
-            mappings_batch: "MutableMapping[UnqualifiedId, Tuple[IdMapping, Sequence[Reference]]]" = dict()
+            mappings_batch: "MutableMapping[QualifiedId, Tuple[IdMapping, Sequence[Reference]]]" = dict()
             for _, elem in lxml.etree.iterparse(
                 pH, tag=("PubmedArticle", "PubmedBookArticleDeleteCitation")
             ):
@@ -232,7 +237,7 @@ quit
                                     f"FIXME: Have a look at PMID {pmid} references"
                                 )
 
-                    mappings_batch[pmid] = (
+                    mappings_batch[(mapping["source"], mapping["id"])] = (
                         mapping,
                         cast("Sequence[Reference]", references),
                     )
@@ -307,7 +312,7 @@ quit
                                     f"FIXME: Have a look at PMID {pmid} references"
                                 )
 
-                    mappings_batch[pmid] = (
+                    mappings_batch[(mapping["source"], mapping["id"])] = (
                         mapping,
                         cast("Sequence[Reference]", references),
                     )
