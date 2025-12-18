@@ -25,6 +25,8 @@ if TYPE_CHECKING:
         Union,
     )
 
+    import datetime
+
     from .doi_cache import DOIChecker
 
     from .pub_cache import (
@@ -40,6 +42,7 @@ if TYPE_CHECKING:
 
     from .pub_common import (
         EnricherId,
+        PublishId,
         QualifiedId,
         SourceId,
     )
@@ -110,7 +113,11 @@ class OfflineAbstractPubEnricher(AbstractPubEnricher):
 
         if len(dir_entries) > 0:
             with self.pubC:
-                self.digest_upstream_dir_entries(dir_entries)
+                self.digest_upstream_dir_entries(
+                    dir_entries,
+                    delete_stale_cache=self.DefaultDeleteStaleCache(),
+                    timestamp=pub_common.Timestamps.BiggestTimestamp(),
+                )
                 # pass
 
     @classmethod
@@ -178,6 +185,8 @@ class OfflineAbstractPubEnricher(AbstractPubEnricher):
     def digest_upstream_dir_entries(
         self,
         dir_entries: "Sequence[Tuple[pathlib.Path, Tuple[bytes, int, float], bool]]",
+        timestamp: "datetime.datetime" = pub_common.Timestamps.UTCTimestamp(),
+        delete_stale_cache: "bool" = True,
     ) -> "None":
         # Now, let's process this
         do_recompute_citations = False
@@ -185,34 +194,57 @@ class OfflineAbstractPubEnricher(AbstractPubEnricher):
             # do_digestion is false when only fingerprint metadata
             # has to be updated
             if do_digestion:
-                for mappings_batch_or_delete_list in self.digest_upstream_file(entry):
-                    if isinstance(mappings_batch_or_delete_list, dict):
-                        self._commit_batch(mappings_batch_or_delete_list)
-                    elif isinstance(mappings_batch_or_delete_list, list):
-                        self.pubC.removeCachedMappings(
-                            mappings_batch_or_delete_list,
-                            delete_stale_cache=self.DefaultDeleteStaleCache(),
+                for (
+                    mappings_batch_or_delete_list_or_idmap_list
+                ) in self.digest_upstream_file(entry):
+                    if isinstance(mappings_batch_or_delete_list_or_idmap_list, dict):
+                        self._commit_batch(
+                            mappings_batch_or_delete_list_or_idmap_list,
+                            timestamp=timestamp,
+                            delete_stale_cache=delete_stale_cache,
                         )
-                        self.pubC.clearCitRefs(
-                            (
-                                (
-                                    (p_elem["source"], p_elem["id"]),
-                                    False,
-                                )
-                                for p_elem in mappings_batch_or_delete_list
+                    elif isinstance(mappings_batch_or_delete_list_or_idmap_list, list):
+                        if len(
+                            mappings_batch_or_delete_list_or_idmap_list
+                        ) > 0 and isinstance(
+                            mappings_batch_or_delete_list_or_idmap_list[0], dict
+                        ):
+                            self.pubC.removeCachedMappings(
+                                mappings_batch_or_delete_list_or_idmap_list,
+                                delete_stale_cache=delete_stale_cache,
                             )
-                        )
-                        self.pubC.clearCitRefs(
-                            (
+                            self.pubC.clearCitRefs(
                                 (
-                                    (p_elem["source"], p_elem["id"]),
-                                    True,
+                                    (
+                                        (p_elem["source"], p_elem["id"]),
+                                        False,
+                                    )
+                                    for p_elem in mappings_batch_or_delete_list_or_idmap_list
                                 )
-                                for p_elem in mappings_batch_or_delete_list
                             )
-                        )
+                            self.pubC.clearCitRefs(
+                                (
+                                    (
+                                        (p_elem["source"], p_elem["id"]),
+                                        True,
+                                    )
+                                    for p_elem in mappings_batch_or_delete_list_or_idmap_list
+                                )
+                            )
+                        elif len(
+                            mappings_batch_or_delete_list_or_idmap_list
+                        ) > 0 and isinstance(
+                            mappings_batch_or_delete_list_or_idmap_list[0], tuple
+                        ):
+                            self.pubC.appendSourceIds_TL(
+                                mappings_batch_or_delete_list_or_idmap_list,
+                                timestamp=timestamp,
+                                delete_stale_cache=delete_stale_cache,
+                            )
+                        else:
+                            self.logger.error("FIXME: a yield type anomaly!!!!")
                     else:
-                        self.logger.error("FIXME: an anomaly!!!!")
+                        self.logger.error("FIXME: a yield anomaly!!!!")
 
                 do_recompute_citations = self.ProvidesReferences()
 
@@ -224,25 +256,27 @@ class OfflineAbstractPubEnricher(AbstractPubEnricher):
             self.pubC.populate_citations_from_refs(
                 self.Name(),
                 self.DefaultSource(),
-                timestamp=pub_common.Timestamps.BiggestTimestamp(),
+                timestamp=timestamp,
             )
 
     @abstractmethod
     def digest_upstream_file(
         self,
         path: "pathlib.Path",
-    ) -> "Iterator[Union[MutableMapping[QualifiedId, Tuple[IdMapping, Sequence[Reference]]], Sequence[IdMappingMinimal]]]":
+    ) -> "Iterator[Union[MutableMapping[QualifiedId, Tuple[IdMapping, Sequence[Reference]]], Sequence[IdMappingMinimal], Sequence[Tuple[Sequence[PublishId], QualifiedId]]]]":
         pass
 
     def _commit_batch(
         self,
         mappings_batch: "Mapping[QualifiedId, Tuple[IdMapping, Sequence[Reference]]]",
+        timestamp: "datetime.datetime" = pub_common.Timestamps.UTCTimestamp(),
+        delete_stale_cache: "bool" = True,
     ) -> "None":
         """Note: the batch must have unique values"""
         self.pubC.setCachedMappings(
             [mapping for mapping, references in mappings_batch.values()],
-            mapping_timestamp=pub_common.Timestamps.BiggestTimestamp(),
-            delete_stale_cache=self.DefaultDeleteStaleCache(),
+            mapping_timestamp=timestamp,
+            delete_stale_cache=delete_stale_cache,
         )
 
         if self.ProvidesReferences():
@@ -268,5 +302,5 @@ class OfflineAbstractPubEnricher(AbstractPubEnricher):
                     )
                     for mapping, references in mappings_batch.values()
                 ),
-                timestamp=pub_common.Timestamps.BiggestTimestamp(),
+                timestamp=timestamp,
             )

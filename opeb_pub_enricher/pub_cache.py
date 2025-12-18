@@ -771,7 +771,7 @@ pub_id = :pub_id
 
     def appendSourceIds_TL(
         self,
-        append_source_ids_batch: "Sequence[Tuple[Sequence[PublishId], SourceId, UnqualifiedId]]",
+        append_source_ids_batch: "Sequence[Tuple[Sequence[PublishId], QualifiedId]]",
         timestamp: "datetime.datetime" = Timestamps.UTCTimestamp(),
         delete_stale_cache: "bool" = True,
     ) -> "None":
@@ -790,10 +790,10 @@ AND DATETIME('NOW','-{} DAYS') > last_fetched
                 (
                     {
                         "enricher": self.enricher_name,
-                        "id": _id,
-                        "source": source_id,
+                        "id": qualified_id[1],
+                        "source": qualified_id[0],
                     }
-                    for publish_id_iter, source_id, _id in append_source_ids_batch
+                    for publish_id_iter, qualified_id in append_source_ids_batch
                 ),
             )
 
@@ -806,18 +806,18 @@ INSERT INTO idmap(pub_id,enricher,id,source,last_fetched) VALUES(:pub_id,:enrich
                 {
                     "enricher": self.enricher_name,
                     "last_fetched": timestamp,
-                    "id": _id,
-                    "source": source_id,
+                    "id": qualified_id[1],
+                    "source": qualified_id[0],
                     "pub_id": publish_id,
                 }
-                for publish_id_iter, source_id, _id in append_source_ids_batch
+                for publish_id_iter, qualified_id in append_source_ids_batch
                 for publish_id in publish_id_iter
             ),
         )
 
     def removeSourceIds_TL(
         self,
-        remove_source_ids_batch: "Sequence[Tuple[Sequence[PublishId], SourceId, UnqualifiedId]]",
+        remove_source_ids_batch: "Sequence[Tuple[Sequence[PublishId], QualifiedId]]",
         delete_stale_cache: "bool" = True,
     ) -> "None":
         cur = self.conn.cursor()
@@ -835,10 +835,10 @@ AND DATETIME('NOW','-{} DAYS') > last_fetched
                 (
                     {
                         "enricher": self.enricher_name,
-                        "id": _id,
-                        "source": source_id,
+                        "id": qualified_id[1],
+                        "source": qualified_id[0],
                     }
-                    for publish_id_iter, source_id, _id in remove_source_ids_batch
+                    for publish_id_iter, qualified_id in remove_source_ids_batch
                 ),
             )
 
@@ -854,11 +854,11 @@ AND pub_id = :pub_id
             (
                 {
                     "enricher": self.enricher_name,
-                    "id": _id,
-                    "source": source_id,
+                    "id": qualified_id[1],
+                    "source": qualified_id[0],
                     "pub_id": publish_id,
                 }
-                for publish_id_iter, source_id, _id in remove_source_ids_batch
+                for publish_id_iter, qualified_id in remove_source_ids_batch
                 for publish_id in publish_id_iter
             ),
         )
@@ -1167,6 +1167,7 @@ INSERT INTO pub(enricher,id,source,payload,last_fetched) VALUES(:enricher,:id,:s
                 # Before anything, get the previous mapping before updating it
                 _id = mapping["id"]
                 source_id = mapping["source"]
+                qualified_id = (source_id, _id)
 
                 # Then, cleanup of sourceIds cache
                 pubmed_id = mapping.get("pmid")
@@ -1204,9 +1205,9 @@ INSERT INTO pub(enricher,id,source,payload,last_fetched) VALUES(:enricher,:id,:s
                         appendable_ids.append(new_id)
 
                 if removable_ids:
-                    remove_source_ids_batch.append((removable_ids, source_id, _id))
+                    remove_source_ids_batch.append((removable_ids, qualified_id))
                 if appendable_ids:
-                    append_source_ids_batch.append((appendable_ids, source_id, _id))
+                    append_source_ids_batch.append((appendable_ids, qualified_id))
 
             if len(remove_source_ids_batch) > 0:
                 self.removeSourceIds_TL(
@@ -1317,6 +1318,7 @@ AND source = :source
                 # Before anything, get the previous mapping before updating it
                 _id = mapping["id"]
                 source_id = mapping["source"]
+                qualified_id = (source_id, _id)
 
                 old_pubmed_id: "Optional[PubmedId]" = None
                 old_doi_id: "Optional[DOIId]" = None
@@ -1343,7 +1345,7 @@ AND source = :source
                         removable_ids.append(old_id)
 
                 if removable_ids:
-                    remove_source_ids_batch.append((removable_ids, source_id, _id))
+                    remove_source_ids_batch.append((removable_ids, qualified_id))
 
             if len(remove_source_ids_batch) > 0:
                 self.removeSourceIds_TL(

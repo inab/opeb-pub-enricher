@@ -36,6 +36,7 @@ if TYPE_CHECKING:
 
     from .pub_common import (
         EnricherId,
+        PublishId,
         QualifiedId,
         SourceId,
         UnqualifiedId,
@@ -161,7 +162,7 @@ quit
     def digest_upstream_file(
         self,
         path: "pathlib.Path",
-    ) -> "Iterator[Union[MutableMapping[QualifiedId, Tuple[IdMapping, Sequence[Reference]]], Sequence[IdMappingMinimal]]]":
+    ) -> "Iterator[Union[MutableMapping[QualifiedId, Tuple[IdMapping, Sequence[Reference]]], Sequence[IdMappingMinimal], Sequence[Tuple[Sequence[PublishId], QualifiedId]]]]":
         with gzip.open(path, mode="rb") as pH:
             mappings_batch: "MutableMapping[QualifiedId, Tuple[IdMapping, Sequence[Reference]]]" = dict()
             for _, elem in lxml.etree.iterparse(
@@ -245,10 +246,13 @@ quit
                 elif elem.tag == "DeleteCitation":
                     the_source_id = self.DefaultSource()
                     yield [
-                        {
-                            "id": p_elem.text,
-                            "source": the_source_id,
-                        }
+                        cast(
+                            "IdMappingMinimal",
+                            {
+                                "id": p_elem.text,
+                                "source": the_source_id,
+                            },
+                        )
                         for p_elem in elem
                     ]
                 elif elem.tag == "PubmedBookArticle":
