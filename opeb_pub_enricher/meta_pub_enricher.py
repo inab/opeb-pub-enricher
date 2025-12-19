@@ -76,6 +76,7 @@ from .europepmc_enricher import EuropePMCEnricher
 from .pubmed_enricher import PubmedEnricher
 from .wikidata_enricher import WikidataEnricher
 from .offline_pubmed_enricher import OfflinePubmedEnricher
+from .offline_europepmc_enricher import OfflineEuropePMCEnricher
 
 from . import pub_common
 
@@ -170,6 +171,7 @@ class MetaEnricher(SkeletonPubEnricher):
         PubmedEnricher,
         WikidataEnricher,
         OfflinePubmedEnricher,
+        OfflineEuropePMCEnricher,
     ]
     RECOGNIZED_BACKENDS_HASH: "Final[OrderedDict[str, Type[ImplementedEnricher]]]" = (  # type: ignore[valid-type]
         OrderedDict(((backend.Name(), backend) for backend in RECOGNIZED_BACKENDS))  # type: ignore[attr-defined]
