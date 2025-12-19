@@ -275,7 +275,7 @@ CREATE TABLE idmap (
 	id VARCHAR(4096) NOT NULL,
 	source VARCHAR(32) NOT NULL,
 	last_fetched TIMESTAMP NOT NULL,
-	PRIMARY KEY (pub_id,id,enricher,source)
+	PRIMARY KEY (pub_id,enricher)
 )
 """)
 
@@ -777,6 +777,30 @@ pub_id = :pub_id
     ) -> "None":
         cur = self.conn.cursor()
 
+        # Now, try storing specifically these
+        cur.executemany(
+            """\
+INSERT INTO idmap(pub_id,enricher,id,source,last_fetched)
+VALUES(:pub_id,:enricher,:id,:source,:last_fetched)
+ON CONFLICT DO
+UPDATE SET
+id=excluded.id,
+source=excluded.source,
+last_fetched=excluded.last_fetched
+""",
+            (
+                {
+                    "enricher": self.enricher_name,
+                    "last_fetched": timestamp,
+                    "id": qualified_id[1],
+                    "source": qualified_id[0],
+                    "pub_id": publish_id,
+                }
+                for publish_id_iter, qualified_id in append_source_ids_batch
+                for publish_id in publish_id_iter
+            ),
+        )
+
         if delete_stale_cache:
             # In case of stale cache, remove all
             cur.executemany(
@@ -796,24 +820,6 @@ AND DATETIME('NOW','-{} DAYS') > last_fetched
                     for publish_id_iter, qualified_id in append_source_ids_batch
                 ),
             )
-
-        # Now, try storing specifically these
-        cur.executemany(
-            """\
-INSERT INTO idmap(pub_id,enricher,id,source,last_fetched) VALUES(:pub_id,:enricher,:id,:source,:last_fetched)
-""",
-            (
-                {
-                    "enricher": self.enricher_name,
-                    "last_fetched": timestamp,
-                    "id": qualified_id[1],
-                    "source": qualified_id[0],
-                    "pub_id": publish_id,
-                }
-                for publish_id_iter, qualified_id in append_source_ids_batch
-                for publish_id in publish_id_iter
-            ),
-        )
 
     def removeSourceIds_TL(
         self,
