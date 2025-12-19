@@ -769,6 +769,19 @@ pub_id = :pub_id
 
         return internal_ids
 
+    def appendSourceIds(
+        self,
+        append_source_ids_batch: "Sequence[Tuple[Sequence[PublishId], QualifiedId]]",
+        timestamp: "datetime.datetime" = Timestamps.UTCTimestamp(),
+        delete_stale_cache: "bool" = True,
+    ) -> "None":
+        with self.conn:
+            self.appendSourceIds_TL(
+                append_source_ids_batch,
+                timestamp=timestamp,
+                delete_stale_cache=delete_stale_cache,
+            )
+
     def appendSourceIds_TL(
         self,
         append_source_ids_batch: "Sequence[Tuple[Sequence[PublishId], QualifiedId]]",
