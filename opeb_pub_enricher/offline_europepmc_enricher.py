@@ -181,6 +181,7 @@ quit
         path: "pathlib.Path",
     ) -> "Iterator[MutableMapping[QualifiedId, Tuple[IdMapping, Sequence[Reference]]]]":
         with tarfile.open(path, mode="r|*", bufsize=1024 * 1024) as tar:
+            total_read: "int" = 0
             for tarinfo in tar:
                 if tarinfo.isfile() and tarinfo.name.endswith(".xml"):
                     mappings_batch: "MutableMapping[QualifiedId, Tuple[IdMapping, Sequence[Reference]]]" = dict()
@@ -236,6 +237,9 @@ quit
                             mapping,
                             cast("Sequence[Reference]", []),
                         )
+                        total_read += 1
+                        if total_read % 100000 == 0:
+                            self.logger.warning(f"Read {total_read}")
 
                         elem.clear(keep_tail=True)
 
@@ -247,6 +251,7 @@ quit
                     # Remaining
                     if len(mappings_batch) > 0:
                         yield mappings_batch
+            self.logger.warning(f"Total read: {total_read}")
 
     def _digest_doi_metadata(
         self,
