@@ -61,11 +61,12 @@ class OfflineEuropePMCEnricher(EuropePMCEnricher, OfflineAbstractPubEnricher):
 
     PMC_LITE_METADATA_BASENAME: "Final[str]" = "PMCLiteMetadata.tgz"
     PMC_LITE_METADATA_URL: "Final[str]" = (
-        "https://europepmc.org/ftp/pmclitemetadata/" + PMC_LITE_METADATA_BASENAME
+        "https://ftp.ebi.ac.uk/pub/databases/pmc/PMCLiteMetadata/"
+        + PMC_LITE_METADATA_BASENAME
     )
     DOI_METADATA_BASENAME: "Final[str]" = "PMID_PMCID_DOI.csv.gz"
     DOI_METADATA_URL: "Final[str]" = (
-        "https://europepmc.org/pub/databases/pmc/DOI/" + DOI_METADATA_BASENAME
+        "https://ftp.ebi.ac.uk/pub/databases/pmc/DOI/" + DOI_METADATA_BASENAME
     )
 
     BATCH_THRESHOLD = 10240
@@ -103,10 +104,10 @@ class OfflineEuropePMCEnricher(EuropePMCEnricher, OfflineAbstractPubEnricher):
 
         command_script = f"""\
 open {parsed_pmc_lite_metadata_url.scheme}://{parsed_pmc_lite_metadata_url.netloc}
-mirror -e --scan-all-first --delete-first --verbose {parsed_pmc_lite_metadata_url.path} {pmc_lite_cache_dir.as_posix()}
+mirror --verbose -f {parsed_pmc_lite_metadata_url.path} -O {pmc_lite_cache_dir.as_posix()}
 close
 open {parsed_doi_metadata_url.scheme}://{parsed_doi_metadata_url.netloc}
-mirror -e --scan-all-first --delete-first --verbose {parsed_doi_metadata_url.path} {doi_metadata_cache_dir.as_posix()}
+mirror --verbose -f {parsed_doi_metadata_url.path} -O {doi_metadata_cache_dir.as_posix()}
 close
 quit
     """
@@ -183,8 +184,9 @@ quit
             for tarinfo in tar:
                 if tarinfo.isfile() and tarinfo.name.endswith(".xml"):
                     mappings_batch: "MutableMapping[QualifiedId, Tuple[IdMapping, Sequence[Reference]]]" = dict()
+                    self.logger.warning(f"Parsing {tarinfo.path} {path.as_posix()}")
                     for _, elem in lxml.etree.iterparse(
-                        tar.extractfile(tarinfo), tag=("PMC_ARTICLE",)
+                        tar.extractfile(tarinfo), tag=("PMC_ARTICLE",), recover=True
                     ):
                         pmid: "Optional[UnqualifiedId]" = None
                         year: "Optional[int]" = None
@@ -194,7 +196,7 @@ quit
                         the_source = elem.findtext("source")
 
                         year_str = elem.findtext("PubYear")
-                        if year_str is not None:
+                        if year_str is not None and len(year_str) > 0:
                             year = int(year_str)
 
                         title = elem.findtext("title")
@@ -251,7 +253,8 @@ quit
         path: "pathlib.Path",
     ) -> "Iterator[Sequence[Tuple[Sequence[PublishId], QualifiedId]]]":
         batch_answer: "MutableSequence[Tuple[Sequence[PublishId], QualifiedId]]" = []
-        with gzip.open(path, mode="rt", encoding="ascii") as dmH:
+        total_read: "int" = 0
+        with gzip.open(path, mode="rt", encoding="latin1") as dmH:
             csv_reader = csv.reader(dmH, dialect="excel")
             header = []
             pmid_col = -1
@@ -260,6 +263,9 @@ quit
 
             for entry in csv_reader:
                 if pmid_col >= 0:
+                    total_read += 1
+                    if total_read % 100000 == 0:
+                        self.logger.warning(f"Read {total_read}")
                     pmid: "str" = entry[pmid_col]
                     pmcid: "str" = entry[pmcid_col]
                     doi: "str" = entry[doi_col]
@@ -298,5 +304,6 @@ quit
                         elif colname == "DOI":
                             doi_col = i_col
 
+        self.logger.warning(f"Total read: {total_read}")
         if len(batch_answer) > 0:
             yield batch_answer

@@ -236,7 +236,7 @@ class OfflineAbstractPubEnricher(AbstractPubEnricher):
                         ) > 0 and isinstance(
                             mappings_batch_or_delete_list_or_idmap_list[0], tuple
                         ):
-                            self.pubC.appendSourceIds_TL(
+                            self.pubC.appendSourceIds(
                                 mappings_batch_or_delete_list_or_idmap_list,
                                 timestamp=timestamp,
                                 delete_stale_cache=delete_stale_cache,
