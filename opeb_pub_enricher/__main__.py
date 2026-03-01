@@ -7,7 +7,9 @@ import os
 import sys
 
 
-from typing import TYPE_CHECKING
+from typing import (
+    TYPE_CHECKING,
+)
 
 if TYPE_CHECKING:
     from typing import (
@@ -88,7 +90,6 @@ def main() -> "None":
         "--backend",
         help="Choose the enrichment backend",
         choices=RECOGNIZED_BACKENDS_HASH,
-        default="europepmc",
     )
     parser.add_argument(
         "-C",
@@ -230,7 +231,18 @@ def main() -> "None":
     if results_format != "single":
         os.makedirs(os.path.abspath(results_path), exist_ok=True)
 
-    ChosenEnricher = RECOGNIZED_BACKENDS_HASH.get(args.backend, DEFAULT_BACKEND)
+    if args.backend is None:
+        backend_name = (
+            DEFAULT_BACKEND.Name()
+            if config is None
+            else config.get(
+                "DEFAULT", "default_backend", fallback=DEFAULT_BACKEND.Name()
+            )
+        )
+    else:
+        backend_name = args.backend
+
+    ChosenEnricher = RECOGNIZED_BACKENDS_HASH.get(backend_name, DEFAULT_BACKEND)
     with ChosenEnricher(cache_dir, config=config) as pub:  # type: ignore[misc]
         # Step 1: fetch the entries with associated pubmed
         opeb_q = OpenEBenchQueries(load_opeb_filename, save_opeb_filename)
