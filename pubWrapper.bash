@@ -46,7 +46,7 @@ if [ $# -eq 3 ] ; then
 		exec > "${workDir}/log.txt" 2>&1
 		source "${SCRIPTDIR}"/.py3env/bin/activate
 		set +e
-		"${SCRIPTDIR}"/.py3env/bin/python "${SCRIPTDIR}"/pubEnricher.py -d -b meta -C "${SCRIPTDIR}"/cron-config.ini -D "$workDir" --use-opeb "$toolsFileXZ" "${parentCacheDir}"/pubCacheDir
+		"${SCRIPTDIR}"/.py3env/bin/python "${SCRIPTDIR}"/pubEnricher.py -d -C "${SCRIPTDIR}"/cron-config.ini -D "$workDir" --use-opeb "$toolsFileXZ" "${parentCacheDir}"/pubCacheDir
 		retval=$?
 		set -e
 		deactivate
