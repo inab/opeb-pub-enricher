@@ -6,7 +6,11 @@ import inspect
 import json
 import logging
 import os
-import sqlite3
+
+try:
+    import pysqlite3 as sqlite3
+except ImportError:
+    import sqlite3  # type: ignore[no-redef]
 import zlib
 
 from typing import (
@@ -793,7 +797,7 @@ pub_id = :pub_id
         # Now, try storing specifically these
         cur.executemany(
             """\
-INSERT INTO idmap(pub_id,enricher,id,source,last_fetched)
+INSERT OR REPLACE INTO idmap(pub_id,enricher,id,source,last_fetched)
 VALUES(:pub_id,:enricher,:id,:source,:last_fetched)
 ON CONFLICT DO
 UPDATE SET

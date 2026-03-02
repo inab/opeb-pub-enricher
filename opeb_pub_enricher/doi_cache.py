@@ -7,7 +7,11 @@ import json
 import logging
 import os
 import re
-import sqlite3
+
+try:
+    import pysqlite3 as sqlite3
+except ImportError:
+    import sqlite3  # type: ignore[no-redef]
 import urllib.parse
 import zlib
 

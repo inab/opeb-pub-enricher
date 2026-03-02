@@ -1,4 +1,5 @@
 configparser; python_version < '3.0'
+pysqlite3
 SPARQLWrapper
 binary-lftp @ git+https://github.com/jmfernandez/binary-lftp.git
 diskcache
