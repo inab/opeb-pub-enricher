@@ -207,8 +207,13 @@ class PubDBCache(object):
         )
 
         # The enricher name, used as default for all the queries
+        if os.path.isabs(cache_dir):
+            abs_cache_dir = cache_dir
+        else:
+            abs_cache_dir = os.path.abspath(cache_dir)
+
         self.enricher_name = enricher_name
-        self.cache_dir = cache_dir
+        self.cache_dir = abs_cache_dir
         self.is_db_synchronous = is_db_synchronous
 
         if doi_checker is None:
@@ -249,6 +254,8 @@ class PubDBCache(object):
             f"""PRAGMA synchronous = {"NORMAL" if self.is_db_synchronous else "OFF"}"""
         )
         self.conn.execute(f"""PRAGMA journal_size_limit = {64 * 1024 * 1024}""")
+        self.conn.execute("""PRAGMA temp_store = 1""")
+        self.conn.execute(f"""PRAGMA temp_store_directory = '{self.cache_dir}'""")
 
         # Database structures
         with self.conn:
