@@ -173,6 +173,30 @@ from . import pub_common
 from .pub_common import Timestamps
 from .doi_cache import DOIChecker
 
+try:
+    from itertools import batched as itertools_batched
+except ImportError:
+    # python 3.11 and older do not have `batched`
+    # Next code is borrowed from
+    # https://docs.python.org/3.13/library/itertools.html#itertools.batched
+    import itertools
+
+    def itertools_batched(  # type: ignore[no-redef]
+        iterable: "Iterable[Any]",
+        n: "int",
+        *,
+        strict: "bool" = False,
+    ) -> "Iterator[Any]":
+        # batched('ABCDEFG', 3) → ABC DEF G
+        if n < 1:
+            raise ValueError("n must be at least one")
+        iterator = iter(iterable)
+        # walrus operator is available since python 3.8
+        while batch := tuple(itertools.islice(iterator, n)):
+            if strict and len(batch) != n:
+                raise ValueError("batched(): incomplete batch")
+            yield batch
+
 
 CACHE_DAYS: "Final[int]" = 28
 
@@ -1476,10 +1500,10 @@ INSERT INTO tempcits VALUES(?,?)
 
             curtemp.execute("""CREATE INDEX tempcits_pmid ON TEMPCITS(pmid)""")
 
-            cur.executemany(
-                """\
-INSERT INTO citref(enricher,id,source,is_cit,payload,last_fetched) VALUES(:enricher,:id,:source, TRUE,:payload,:last_fetched)
-""",
+            # The last executemany was exploding in memory with this
+            # because although the input is an iterable, the whole
+            # iterable is translated into a list.
+            for batch in itertools_batched(
                 (
                     {
                         "enricher": enricher_id,
@@ -1499,4 +1523,11 @@ GROUP BY pmid
                     """
                     )
                 ),
-            )
+                n=100 * 1024,
+            ):
+                cur.executemany(
+                    """\
+INSERT INTO citref(enricher,id,source,is_cit,payload,last_fetched) VALUES(:enricher,:id,:source, TRUE,:payload,:last_fetched)
+""",
+                    batch,
+                )
