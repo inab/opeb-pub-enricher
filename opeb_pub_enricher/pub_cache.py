@@ -328,6 +328,10 @@ CREATE INDEX citref_e_i_s ON citref(enricher,id,source)
                 cur.execute("""\
 CREATE INDEX citref_l_f ON citref(last_fetched)
 """)
+                # Index on the is_cit
+                cur.execute("""\
+CREATE INDEX citref_i_c ON citref(is_cit)
+""")
                 # Lower Mappings
                 cur.execute("""\
 CREATE TABLE lower_map (
