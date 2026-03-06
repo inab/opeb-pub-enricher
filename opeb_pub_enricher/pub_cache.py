@@ -15,7 +15,6 @@ import zlib
 
 from typing import (
     cast,
-    overload,
     TYPE_CHECKING,
 )
 
@@ -148,7 +147,6 @@ if TYPE_CHECKING:
         doi: DOIId
 
     class CitRefMapping(CitRefBase):
-        is_cit: bool
         payload: Optional[bytes]  # zlib compressed list of citations or references
         last_fetched: datetime.datetime
 
@@ -214,6 +212,9 @@ class PubDBCache(object):
     DEFAULT_CACHE_DB_FILE: "Final[str]" = "pubEnricher_CACHE.db"
 
     OLDEST_CACHE: "Final[datetime.timedelta]" = datetime.timedelta(days=CACHE_DAYS)
+
+    REFERENCES_TABLE: "Final[str]" = "references"
+    CITATIONS_TABLE: "Final[str]" = "citations"
 
     def __init__(
         self,
@@ -333,28 +334,24 @@ CREATE INDEX idmap_l_f ON idmap(last_fetched)
                 # Denormalized citations and references
                 # so we can register empty answers,
                 # and get the whole list with a single query
-                cur.execute("""\
-CREATE TABLE citref (
+                for tablename in (self.REFERENCES_TABLE, self.CITATIONS_TABLE):
+                    cur.execute(f"""\
+CREATE TABLE {tablename} (
 	enricher VARCHAR(32) NOT NULL,
 	id VARCHAR(4096) NOT NULL,
 	source VARCHAR(32) NOT NULL,
-	is_cit BOOLEAN NOT NULL,
 	payload BLOB,
 	last_fetched TIMESTAMP NOT NULL,
 	FOREIGN KEY (enricher,id,source) REFERENCES pub(enricher,id,source) ON DELETE CASCADE ON UPDATE CASCADE
 )
 """)
-                # Index on the enricher, id and source
-                cur.execute("""\
-CREATE INDEX citref_e_i_s ON citref(enricher,id,source)
+                    # Index on the enricher, id and source
+                    cur.execute(f"""\
+CREATE INDEX {tablename}_e_i_s ON {tablename}(enricher,id,source)
 """)
-                # Index on the last_fetched
-                cur.execute("""\
-CREATE INDEX citref_l_f ON citref(last_fetched)
-""")
-                # Index on the is_cit
-                cur.execute("""\
-CREATE INDEX citref_i_c ON citref(is_cit)
+                    # Index on the last_fetched
+                    cur.execute(f"""\
+CREATE INDEX {tablename}_l_f ON {tablename}(last_fetched)
 """)
                 # Lower Mappings
                 cur.execute("""\
@@ -378,6 +375,27 @@ CREATE INDEX lower_map_e_i_s ON lower_map(lower_enricher,lower_id,lower_source)
                 cur.execute("""\
 CREATE INDEX lower_map_l_f ON lower_map(last_fetched)
 """)
+
+            # Provide a migration path
+            # from citref to references and citations
+            for _ in cur.execute(
+                """SELECT name FROM sqlite_master WHERE type='table' AND name='citref'"""
+            ):
+                cur.execute(f"""\
+INSERT INTO {self.REFERENCES_TABLE}(enricher, id, source, payload, last_fetched)
+SELECT enricher, id, source, payload, last_fetched
+FROM citref
+WHERE NOT is_cit
+                """)
+                cur.execute(f"""\
+INSERT INTO {self.CITATIONS_TABLE}(enricher, id, source, payload, last_fetched)
+SELECT enricher, id, source, payload, last_fetched
+FROM citref
+WHERE is_cit
+                """)
+                cur.execute("""DROP TABLE citref""")
+                break
+
             cur.close()
 
         return self
@@ -394,26 +412,32 @@ CREATE INDEX lower_map_l_f ON lower_map(last_fetched)
         # This method has become a no-op
         pass
 
-    @overload
-    def getAllCitRefs(
+    def getAllReferences(
         self,
         source_id: "SourceId",
-        is_cit: "Literal[True]",
         delete_stale_cache: "bool" = True,
-    ) -> "Iterator[Optional[Tuple[UnqualifiedId, Sequence[Citation]]]]": ...
+    ) -> "Iterator[Optional[Tuple[UnqualifiedId, Sequence[Reference]]]]":
+        return self._getAllCitRefs(
+            source_id,
+            table=self.REFERENCES_TABLE,
+            delete_stale_cache=delete_stale_cache,
+        )
 
-    @overload
-    def getAllCitRefs(
+    def getAllCitations(
         self,
         source_id: "SourceId",
-        is_cit: "Literal[False]",
         delete_stale_cache: "bool" = True,
-    ) -> "Iterator[Optional[Tuple[UnqualifiedId, Sequence[Reference]]]]": ...
+    ) -> "Iterator[Optional[Tuple[UnqualifiedId, Sequence[Citation]]]]":
+        return self._getAllCitRefs(
+            source_id,
+            table=self.CITATIONS_TABLE,
+            delete_stale_cache=delete_stale_cache,
+        )
 
-    def getAllCitRefs(
+    def _getAllCitRefs(
         self,
         source_id: "SourceId",
-        is_cit: "bool",
+        table: "str",
         delete_stale_cache: "bool" = True,
     ) -> "Union[Iterator[Optional[Tuple[UnqualifiedId, Sequence[Citation]]]], Iterator[Optional[Tuple[UnqualifiedId, Sequence[Reference]]]]]":
         with self.conn:
@@ -422,31 +446,26 @@ CREATE INDEX lower_map_l_f ON lower_map(last_fetched)
             for res in cur.execute(
                 """\
 SELECT id, payload
-FROM citref
+FROM {}
 WHERE
 DATETIME('NOW','-{} DAYS') <= last_fetched
 AND
 enricher = :enricher
 AND
 source = :source
-AND
-is_cit = :is_cit
-""".format(CACHE_DAYS)
+""".format(table, CACHE_DAYS)
                 if delete_stale_cache
                 else """\
 SELECT id, payload
-FROM citref
+FROM {}
 WHERE
 enricher = :enricher
 AND
 source = :source
-AND
-is_cit = :is_cit
-""",
+""".format(table),
                 {
                     "enricher": self.enricher_name,
                     "source": source_id,
-                    "is_cit": is_cit,
                 },
             ):
                 yield (
@@ -458,10 +477,10 @@ is_cit = :is_cit
             else:
                 yield None
 
-    def getCitRefs(
+    def _getCitRefs(
         self,
         qual_list: "Iterable[QualifiedId]",
-        is_cit: "bool",
+        table: "str",
         delete_stale_cache: "bool" = True,
     ) -> "Union[Iterator[Optional[Sequence[Citation]]], Iterator[Optional[Sequence[Reference]]]]":
         with self.conn:
@@ -471,7 +490,7 @@ is_cit = :is_cit
                 cur.execute(
                     """\
 SELECT payload
-FROM citref
+FROM {}
 WHERE
 DATETIME('NOW','-{} DAYS') <= last_fetched
 AND
@@ -480,27 +499,22 @@ AND
 id = :id
 AND
 source = :source
-AND
-is_cit = :is_cit
-""".format(CACHE_DAYS)
+""".format(table, CACHE_DAYS)
                     if delete_stale_cache
                     else """\
 SELECT payload
-FROM citref
+FROM {}
 WHERE
 enricher = :enricher
 AND
 id = :id
 AND
 source = :source
-AND
-is_cit = :is_cit
-""",
+""".format(table),
                     {
                         "enricher": self.enricher_name,
                         "id": _id,
                         "source": source_id,
-                        "is_cit": is_cit,
                     },
                 )
                 res = cur.fetchone()
@@ -513,9 +527,9 @@ is_cit = :is_cit
                 else:
                     yield None
 
-    def clearCitRefs(
+    def clearReferences(
         self,
-        qualid_list: "Iterable[Tuple[QualifiedId, bool]]",
+        qualid_list: "Iterable[QualifiedId]",
     ) -> "None":
         with self.conn:
             cur = self.conn.cursor()
@@ -523,26 +537,50 @@ is_cit = :is_cit
             # Remove
             cur.executemany(
                 """\
-DELETE FROM citref
+DELETE FROM references
 WHERE enricher = :enricher
 AND id = :id
 AND source = :source
-AND is_cit = :is_cit
 """,
                 (
                     {
                         "enricher": self.enricher_name,
                         "source": qual_id[0],
                         "id": qual_id[1],
-                        "is_cit": is_cit,
                     }
-                    for qual_id, is_cit in qualid_list
+                    for qual_id in qualid_list
                 ),
             )
 
-    def setCitRefs_ll(
+    def clearCitations(
         self,
-        citref_list: "Iterable[Union[Tuple[QualifiedId,Sequence[Citation], Literal[True]], Tuple[QualifiedId, Sequence[Reference], Literal[False]]]]",
+        qualid_list: "Iterable[QualifiedId]",
+    ) -> "None":
+        with self.conn:
+            cur = self.conn.cursor()
+
+            # Remove
+            cur.executemany(
+                """\
+DELETE FROM citations
+WHERE enricher = :enricher
+AND id = :id
+AND source = :source
+""",
+                (
+                    {
+                        "enricher": self.enricher_name,
+                        "source": qual_id[0],
+                        "id": qual_id[1],
+                    }
+                    for qual_id in qualid_list
+                ),
+            )
+
+    def _setCitRefs_ll(
+        self,
+        citref_list: "Union[Iterable[Tuple[QualifiedId,Sequence[Citation]]], Iterable[Tuple[QualifiedId, Sequence[Reference]]]]",
+        table: "str",
         timestamp: "datetime.datetime" = Timestamps.UTCTimestamp(),
     ) -> "None":
         with self.conn:
@@ -551,14 +589,13 @@ AND is_cit = :is_cit
             # Then, insert
             cur.executemany(
                 """\
-INSERT INTO citref(enricher,id,source,is_cit,payload,last_fetched) VALUES(:enricher,:id,:source,:is_cit,:payload,:last_fetched)
-""",
+INSERT INTO {}(enricher,id,source,payload,last_fetched) VALUES(:enricher,:id,:source,:payload,:last_fetched)
+""".format(table),
                 (
                     {
                         "enricher": self.enricher_name,
                         "source": qual_id[0],
                         "id": qual_id[1],
-                        "is_cit": is_cit,
                         "payload": zlib.compress(
                             self.je.encode(citrefs).encode("utf-8"),
                             zlib.Z_BEST_COMPRESSION,
@@ -567,13 +604,23 @@ INSERT INTO citref(enricher,id,source,is_cit,payload,last_fetched) VALUES(:enric
                         else None,
                         "last_fetched": timestamp,
                     }
-                    for qual_id, citrefs, is_cit in citref_list
+                    for qual_id, citrefs in citref_list
                 ),
             )
 
-    def setCitRefs(
+    def setReferences_ll(
         self,
-        citref_list: "Iterable[Union[Tuple[QualifiedId,Sequence[Citation], Literal[True]], Tuple[QualifiedId, Sequence[Reference], Literal[False]]]]",
+        references_list: "Iterable[Tuple[QualifiedId, Sequence[Reference]]]",
+        timestamp: "datetime.datetime" = Timestamps.UTCTimestamp(),
+    ) -> "None":
+        self._setCitRefs_ll(
+            references_list, table=self.REFERENCES_TABLE, timestamp=timestamp
+        )
+
+    def _setCitRefs(
+        self,
+        citref_list: "Union[Iterable[Tuple[QualifiedId,Sequence[Citation]]], Iterable[Tuple[QualifiedId, Sequence[Reference]]]]",
+        table: "str",
         timestamp: "datetime.datetime" = Timestamps.UTCTimestamp(),
     ) -> None:
         with self.conn:
@@ -583,7 +630,6 @@ INSERT INTO citref(enricher,id,source,is_cit,payload,last_fetched) VALUES(:enric
                     "enricher": self.enricher_name,
                     "source": qual_id[0],
                     "id": qual_id[1],
-                    "is_cit": is_cit,
                     "payload": zlib.compress(
                         self.je.encode(citrefs).encode("utf-8"), zlib.Z_BEST_COMPRESSION
                     )
@@ -591,26 +637,25 @@ INSERT INTO citref(enricher,id,source,is_cit,payload,last_fetched) VALUES(:enric
                     else None,
                     "last_fetched": timestamp,
                 }
-                for qual_id, citrefs, is_cit in citref_list
+                for qual_id, citrefs in citref_list
             ]
 
             # First, remove
             cur.executemany(
                 """\
-DELETE FROM citref
+DELETE FROM {}
 WHERE enricher = :enricher
 AND id = :id
 AND source = :source
-AND is_cit = :is_cit
-""",
+""".format(table),
                 params_list,
             )
 
             # Then, insert
             cur.executemany(
                 """\
-INSERT INTO citref(enricher,id,source,is_cit,payload,last_fetched) VALUES(:enricher,:id,:source,:is_cit,:payload,:last_fetched)
-""",
+INSERT INTO {}(enricher,id,source,payload,last_fetched) VALUES(:enricher,:id,:source,:payload,:last_fetched)
+""".format(table),
                 params_list,
             )
 
@@ -619,8 +664,10 @@ INSERT INTO citref(enricher,id,source,is_cit,payload,last_fetched) VALUES(:enric
         qualified_id: "QualifiedId",
         delete_stale_cache: "bool" = True,
     ) -> "Union[Tuple[Sequence[Citation],CitationCount], Tuple[None, None]]":
-        for citations in self.getCitRefs(
-            [qualified_id], True, delete_stale_cache=delete_stale_cache
+        for citations in self._getCitRefs(
+            [qualified_id],
+            table=self.CITATIONS_TABLE,
+            delete_stale_cache=delete_stale_cache,
         ):
             if citations is not None:
                 return citations, len(citations)
@@ -634,12 +681,10 @@ INSERT INTO citref(enricher,id,source,is_cit,payload,last_fetched) VALUES(:enric
         citations_batch: "Iterable[Tuple[QualifiedId, Sequence[Citation]]]",
         timestamp: "datetime.datetime" = Timestamps.UTCTimestamp(),
     ) -> None:
-        self.setCitRefs(
-            (
-                (qualified_id, citations, True)
-                for qualified_id, citations in citations_batch
-            ),
-            timestamp,
+        self._setCitRefs(
+            citations_batch,
+            table=self.CITATIONS_TABLE,
+            timestamp=timestamp,
         )
 
     def setCitationsAndCount(
@@ -649,15 +694,17 @@ INSERT INTO citref(enricher,id,source,is_cit,payload,last_fetched) VALUES(:enric
         citation_count: "CitationCount",
         timestamp: "datetime.datetime" = Timestamps.UTCTimestamp(),
     ) -> None:
-        self.setCitRefs([(qualified_id, citations, True)], timestamp)
+        self.setCitationsBatch([(qualified_id, citations)], timestamp=timestamp)
 
     def getReferencesAndCount(
         self,
         qualified_id: "QualifiedId",
         delete_stale_cache: "bool" = True,
     ) -> "Union[Tuple[Sequence[Reference],ReferenceCount], Tuple[None, None]]":
-        for references in self.getCitRefs(
-            [qualified_id], False, delete_stale_cache=delete_stale_cache
+        for references in self._getCitRefs(
+            [qualified_id],
+            table=self.REFERENCES_TABLE,
+            delete_stale_cache=delete_stale_cache,
         ):
             if references is not None:
                 return references, len(references)
@@ -671,12 +718,10 @@ INSERT INTO citref(enricher,id,source,is_cit,payload,last_fetched) VALUES(:enric
         references_batch: "Iterable[Tuple[QualifiedId, Sequence[Reference]]]",
         timestamp: "datetime.datetime" = Timestamps.UTCTimestamp(),
     ) -> None:
-        self.setCitRefs(
-            (
-                (qualified_id, references, False)
-                for qualified_id, references in references_batch
-            ),
-            timestamp,
+        self._setCitRefs(
+            references_batch,
+            table=self.REFERENCES_TABLE,
+            timestamp=timestamp,
         )
 
     def setReferencesAndCount(
@@ -686,7 +731,7 @@ INSERT INTO citref(enricher,id,source,is_cit,payload,last_fetched) VALUES(:enric
         reference_count: "ReferenceCount",
         timestamp: "datetime.datetime" = Timestamps.UTCTimestamp(),
     ) -> None:
-        self.setCitRefs([(qualified_id, references, False)], timestamp)
+        self.setReferencesBatch([(qualified_id, references)], timestamp=timestamp)
 
     def getRawCachedMappings_TL(
         self, qual_list: "Iterable[QualifiedId]"
@@ -1447,10 +1492,9 @@ AND source = :source
             # Remove all citations
             cur.execute(
                 """\
-DELETE FROM citref
+DELETE FROM citations
 WHERE enricher = :enricher
 AND source = :source
-AND is_cit
 """,
                 {
                     "enricher": enricher_id,
@@ -1473,13 +1517,11 @@ CREATE TEMPORARY TABLE tempcits (
             for res in cur.execute(
                 """\
 SELECT id, payload
-FROM citref
+FROM references
 WHERE
 enricher = :enricher
 AND
 source = :source
-AND
-NOT is_cit
                 """,
                 {"enricher": enricher_id, "source": source_id},
             ):
@@ -1527,7 +1569,7 @@ GROUP BY pmid
             ):
                 cur.executemany(
                     """\
-INSERT INTO citref(enricher,id,source,is_cit,payload,last_fetched) VALUES(:enricher,:id,:source, TRUE,:payload,:last_fetched)
+INSERT INTO citations(enricher,id,source,payload,last_fetched) VALUES(:enricher,:id,:source,:payload,:last_fetched)
 """,
                     batch,
                 )

@@ -213,21 +213,15 @@ class OfflineAbstractPubEnricher(AbstractPubEnricher):
                                 mappings_batch_or_delete_list_or_idmap_list,
                                 delete_stale_cache=delete_stale_cache,
                             )
-                            self.pubC.clearCitRefs(
+                            self.pubC.clearReferences(
                                 (
-                                    (
-                                        (p_elem["source"], p_elem["id"]),
-                                        False,
-                                    )
+                                    (p_elem["source"], p_elem["id"])
                                     for p_elem in mappings_batch_or_delete_list_or_idmap_list
                                 )
                             )
-                            self.pubC.clearCitRefs(
+                            self.pubC.clearCitations(
                                 (
-                                    (
-                                        (p_elem["source"], p_elem["id"]),
-                                        True,
-                                    )
+                                    (p_elem["source"], p_elem["id"])
                                     for p_elem in mappings_batch_or_delete_list_or_idmap_list
                                 )
                             )
@@ -282,23 +276,19 @@ class OfflineAbstractPubEnricher(AbstractPubEnricher):
         if self.ProvidesReferences():
             # This artificial separation is needed to avoid having the whole
             # list of cited manuscripts in memory
-            self.pubC.clearCitRefs(
+            self.pubC.clearReferences(
                 (
-                    (
-                        (mapping["source"], mapping["id"]),
-                        False,
-                    )
+                    (mapping["source"], mapping["id"])
                     for mapping, references in mappings_batch.values()
                 )
             )
             # This artificial separation is needed to avoid having the whole
             # list of cited manuscripts in memory
-            self.pubC.setCitRefs_ll(
+            self.pubC.setReferences_ll(
                 (
                     (
                         (mapping["source"], mapping["id"]),
                         references,
-                        False,
                     )
                     for mapping, references in mappings_batch.values()
                 ),
