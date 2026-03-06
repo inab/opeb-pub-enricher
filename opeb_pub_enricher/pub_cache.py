@@ -213,8 +213,8 @@ class PubDBCache(object):
 
     OLDEST_CACHE: "Final[datetime.timedelta]" = datetime.timedelta(days=CACHE_DAYS)
 
-    REFERENCES_TABLE: "Final[str]" = "references"
-    CITATIONS_TABLE: "Final[str]" = "citations"
+    REFERENCES_TABLE: "Final[str]" = "pub_references"
+    CITATIONS_TABLE: "Final[str]" = "pub_citations"
 
     def __init__(
         self,
@@ -537,11 +537,11 @@ source = :source
             # Remove
             cur.executemany(
                 """\
-DELETE FROM references
+DELETE FROM {}
 WHERE enricher = :enricher
 AND id = :id
 AND source = :source
-""",
+""".format(self.REFERENCES_TABLE),
                 (
                     {
                         "enricher": self.enricher_name,
@@ -562,11 +562,11 @@ AND source = :source
             # Remove
             cur.executemany(
                 """\
-DELETE FROM citations
+DELETE FROM {}
 WHERE enricher = :enricher
 AND id = :id
 AND source = :source
-""",
+""".format(self.CITATIONS_TABLE),
                 (
                     {
                         "enricher": self.enricher_name,
@@ -1492,10 +1492,10 @@ AND source = :source
             # Remove all citations
             cur.execute(
                 """\
-DELETE FROM citations
+DELETE FROM {}
 WHERE enricher = :enricher
 AND source = :source
-""",
+""".format(self.CITATIONS_TABLE),
                 {
                     "enricher": enricher_id,
                     "source": source_id,
@@ -1517,12 +1517,12 @@ CREATE TEMPORARY TABLE tempcits (
             for res in cur.execute(
                 """\
 SELECT id, payload
-FROM references
+FROM {}
 WHERE
 enricher = :enricher
 AND
 source = :source
-                """,
+                """.format(self.REFERENCES_TABLE),
                 {"enricher": enricher_id, "source": source_id},
             ):
                 curtemp.executemany(
@@ -1569,7 +1569,7 @@ GROUP BY pmid
             ):
                 cur.executemany(
                     """\
-INSERT INTO citations(enricher,id,source,payload,last_fetched) VALUES(:enricher,:id,:source,:payload,:last_fetched)
-""",
+INSERT INTO {}(enricher,id,source,payload,last_fetched) VALUES(:enricher,:id,:source,:payload,:last_fetched)
+""".format(self.CITATIONS_TABLE),
                     batch,
                 )
