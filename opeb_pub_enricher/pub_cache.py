@@ -294,13 +294,13 @@ CREATE TABLE pub (
 	source VARCHAR(32) NOT NULL,
 	payload BLOB NOT NULL,
 	last_fetched TIMESTAMP NOT NULL,
-	PRIMARY KEY (enricher,id,source)
+	PRIMARY KEY (enricher,source,id)
 )
 """)
-                # Index on the last_fetched
-                cur.execute("""\
-CREATE INDEX pub_l_f ON pub(last_fetched)
-""")
+                #                # Index on the last_fetched
+                #                cur.execute("""\
+                # CREATE INDEX pub_l_f ON pub(last_fetched)
+                # """)
                 # IDMap
                 # pub_id_type VARCHAR(32) NOT NULL,
                 # PRIMARY KEY (pub_id,pub_id_type),
@@ -315,22 +315,22 @@ CREATE TABLE idmap (
 )
 """)
 
-                # Index on the pub_id
-                cur.execute("""\
-CREATE INDEX idmap_pub_id ON idmap(pub_id)
-""")
-                # Index on the enricher
-                cur.execute("""\
-CREATE INDEX idmap_enricher ON idmap(enricher)
-""")
+                #                # Index on the pub_id
+                #                cur.execute("""\
+                # CREATE INDEX idmap_pub_id ON idmap(pub_id)
+                # """)
+                #                # Index on the enricher
+                #                cur.execute("""\
+                # CREATE INDEX idmap_enricher ON idmap(enricher)
+                # """)
                 # Index on the id and the source
                 cur.execute("""\
 CREATE INDEX idmap_id_source ON idmap(id,source)
 """)
-                # Index on the last_fetched
-                cur.execute("""\
-CREATE INDEX idmap_l_f ON idmap(last_fetched)
-""")
+                #                # Index on the last_fetched
+                #                cur.execute("""\
+                # CREATE INDEX idmap_l_f ON idmap(last_fetched)
+                # """)
                 # Denormalized citations and references
                 # so we can register empty answers,
                 # and get the whole list with a single query
@@ -349,10 +349,10 @@ CREATE TABLE {tablename} (
                     cur.execute(f"""\
 CREATE INDEX {tablename}_e_i_s ON {tablename}(enricher,id,source)
 """)
-                    # Index on the last_fetched
-                    cur.execute(f"""\
-CREATE INDEX {tablename}_l_f ON {tablename}(last_fetched)
-""")
+                #                    # Index on the last_fetched
+                #                    cur.execute(f"""\
+                # CREATE INDEX {tablename}_l_f ON {tablename}(last_fetched)
+                # """)
                 # Lower Mappings
                 cur.execute("""\
 CREATE TABLE lower_map (
@@ -371,10 +371,10 @@ CREATE TABLE lower_map (
                 cur.execute("""\
 CREATE INDEX lower_map_e_i_s ON lower_map(lower_enricher,lower_id,lower_source)
 """)
-                # Index on the last_fetched
-                cur.execute("""\
-CREATE INDEX lower_map_l_f ON lower_map(last_fetched)
-""")
+            #                # Index on the last_fetched
+            #                cur.execute("""\
+            # CREATE INDEX lower_map_l_f ON lower_map(last_fetched)
+            # """)
 
             # Provide a migration path
             # from citref to references and citations
