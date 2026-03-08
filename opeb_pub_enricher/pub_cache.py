@@ -874,9 +874,9 @@ pub_id = :pub_id
         # Now, try storing specifically these
         cur.executemany(
             """\
-INSERT INTO idmap(pub_id,enricher,id,source,last_fetched)
+INSERT OR REPLACE INTO idmap(pub_id,enricher,id,source,last_fetched)
 VALUES(:pub_id,:enricher,:id,:source,:last_fetched)
-ON CONFLICT DO
+ON CONFLICT(pub_id,enricher) DO
 UPDATE SET
 id=excluded.id,
 source=excluded.source,
