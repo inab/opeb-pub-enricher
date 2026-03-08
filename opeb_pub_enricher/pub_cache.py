@@ -7,10 +7,7 @@ import json
 import logging
 import os
 
-try:
-    import pysqlite3 as sqlite3
-except ImportError:
-    import sqlite3  # type: ignore[no-redef]
+import sqlite3
 import zlib
 
 from typing import (
@@ -1486,7 +1483,22 @@ AND source = :source
         source_id: "SourceId",
         timestamp: "datetime.datetime" = Timestamps.UTCTimestamp(),
     ) -> "None":
-        with self.conn:
+        # This method creates its own temporary database
+        temp_db_file = self.cache_db_file + "_TEMP"
+        temp_conn = sqlite3.connect(
+            temp_db_file,
+            detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES,
+            check_same_thread=False,
+        )
+        temp_conn.execute("""PRAGMA locking_mode = EXCLUSIVE""")
+        temp_conn.execute("""PRAGMA journal_mode = OFF""")
+        temp_conn.execute("""PRAGMA synchronous = OFF""")
+        temp_conn.execute(f"""PRAGMA cache_size = {10 * 1024}""")
+        temp_conn.execute("""PRAGMA temp_store = 1""")
+        temp_conn.execute(f"""PRAGMA temp_store_directory = '{self.cache_dir}'""")
+
+        # Database structures
+        with temp_conn, self.conn:
             cur = self.conn.cursor()
 
             # Remove all citations
@@ -1502,28 +1514,33 @@ AND source = :source
                 },
             )
 
-            curtemp = self.conn.cursor()
+            curtemp = temp_conn.cursor()
+            # Publication table
+            curtemp.execute("""DROP TABLE IF EXISTS tempcits""")
             # TEMP citations table
             curtemp.execute("""\
-CREATE TEMPORARY TABLE tempcits (
+CREATE TABLE tempcits (
 	pmid VARCHAR(4096) NOT NULL,
     cit_pmid VARCHAR(4096) NOT NULL
 )
 """)
             curtemp.close()
-            self.conn.commit()
-            curtemp = self.conn.cursor()
+            temp_conn.commit()
+            curtemp = temp_conn.cursor()
 
-            for res in cur.execute(
-                """\
+            for batch in itertools_batched(
+                cur.execute(
+                    """\
 SELECT id, payload
 FROM {}
 WHERE
 enricher = :enricher
 AND
 source = :source
-                """.format(self.REFERENCES_TABLE),
-                {"enricher": enricher_id, "source": source_id},
+                    """.format(self.REFERENCES_TABLE),
+                    {"enricher": enricher_id, "source": source_id},
+                ),
+                n=10 * 1024,
             ):
                 curtemp.executemany(
                     """\
@@ -1534,6 +1551,7 @@ INSERT INTO tempcits VALUES(?,?)
                             ref["id"],
                             res[0],
                         )
+                        for res in batch
                         for ref in self.jd.decode(
                             zlib.decompress(res[1]).decode("utf-8")
                         )
@@ -1559,10 +1577,10 @@ INSERT INTO tempcits VALUES(?,?)
                     }
                     for lastres in curtemp.execute(
                         """\
-SELECT pmid, '{"id": "' || GROUP_CONCAT(cit_pmid, '", "source": "pubmed"},{"id": "') || '", "source": "pubmed"}'
+SELECT pmid, '{{"id": "' || GROUP_CONCAT(cit_pmid, '", "source": "{0}"}},{{"id": "') || '", "source": "{0}"}}'
 FROM tempcits
 GROUP BY pmid
-                    """
+                    """.format(source_id)
                     )
                 ),
                 n=100 * 1024,
@@ -1573,3 +1591,6 @@ INSERT INTO {}(enricher,id,source,payload,last_fetched) VALUES(:enricher,:id,:so
 """.format(self.CITATIONS_TABLE),
                     batch,
                 )
+        temp_conn.close()
+        if os.path.exists(temp_db_file):
+            os.unlink(temp_db_file)
