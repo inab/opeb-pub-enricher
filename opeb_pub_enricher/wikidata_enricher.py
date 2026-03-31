@@ -122,7 +122,10 @@ class WikidataEnricher(AbstractPubEnricher):
 
     # Do not change this constant!!!
     WIKIDATA_SOURCE: "Final[EnricherId]" = cast("EnricherId", "wikidata")
-    WIKIDATA_SPARQL_ENDPOINT: "Final[str]" = "https://query.wikidata.org/sparql"
+    # Switched the endpoint, due Wikidata graph split
+    WIKIDATA_SPARQL_ENDPOINT: "Final[str]" = (
+        "https://query-scholarly.wikidata.org/sparql"
+    )
 
     @classmethod
     def Name(cls) -> "EnricherId":
